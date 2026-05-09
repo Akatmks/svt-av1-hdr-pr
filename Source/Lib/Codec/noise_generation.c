@@ -237,7 +237,6 @@ static void set_scaling_points_uv(AomFilmGrain* film_grain, const NoiseArgs* noi
         film_grain->scaling_points_cr[5][0] = film_grain->scaling_points_cb[5][0] = range_max;
         film_grain->scaling_points_cr[5][1] = film_grain->scaling_points_cb[5][1] = 0;
     }
-    }
 }
 
 static uint8_t get_grain_size(const NoiseArgs* noise_args) {
