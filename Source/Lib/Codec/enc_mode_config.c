@@ -1539,9 +1539,9 @@ static void dlf_level_modulation(PictureControlSet* pcs, uint8_t* default_dlf_le
     if (modulation_mode == 2 || modulation_mode == 3) {
         if (dlf_level > 4) {
             if (pcs->ref_skip_percentage > 95) {
-                dlf_level = dlf_level >= 6 ? 0 : dlf_level + 2;
+                dlf_level = 7;
             } else if (pcs->ref_skip_percentage > 75) {
-                dlf_level = dlf_level == 7 ? 0 : dlf_level + 1;
+                dlf_level = MIN(7, dlf_level + 1);
             }
         }
     }
@@ -1568,17 +1568,13 @@ static uint8_t get_dlf_level_default(PictureControlSet* pcs, EncMode enc_mode, u
             dlf_level       = is_not_last_layer ? 3 : 6;
             modulation_mode = 3;
         } else if (enc_mode <= ENC_M9) {
-            dlf_level       = is_not_last_layer ? 6 : 0;
+            dlf_level       = is_not_last_layer ? 6 : 7;
             modulation_mode = 3;
         } else if (enc_mode <= ENC_M11) {
-            if (pcs->coeff_lvl == HIGH_LVL) {
-                dlf_level = is_base ? 6 : 0;
-            } else {
-                dlf_level = is_base ? 6 : is_not_last_layer ? 7 : 0;
-            }
+            dlf_level       = is_base ? 6 : 7;
             modulation_mode = 3;
         } else {
-            dlf_level       = 0;
+            dlf_level       = 7;
             modulation_mode = 3;
         }
     } else { // fast-decode 2
@@ -1612,7 +1608,7 @@ static uint8_t get_dlf_level_rtc(PictureControlSet* pcs, EncMode enc_mode, uint8
             dlf_level       = 6;
             modulation_mode = 3;
         } else if (enc_mode <= ENC_M10) {
-            dlf_level       = is_not_last_layer ? 6 : 0;
+            dlf_level       = is_not_last_layer ? 6 : 7;
             modulation_mode = 3;
         } else {
             dlf_level       = 0;
@@ -1623,10 +1619,10 @@ static uint8_t get_dlf_level_rtc(PictureControlSet* pcs, EncMode enc_mode, uint8
             dlf_level       = 6;
             modulation_mode = 3;
         } else if (enc_mode <= ENC_M9) {
-            dlf_level       = is_not_last_layer ? 6 : 0;
+            dlf_level       = is_not_last_layer ? 6 : 7;
             modulation_mode = 3;
         } else {
-            dlf_level       = 0;
+            dlf_level       = 7;
             modulation_mode = 3;
         }
     }
@@ -2168,7 +2164,9 @@ void svt_aom_sig_deriv_multi_processes_default(SequenceControlSet* scs, PictureP
     // 1                                     ON
     pcs->frame_end_cdf_update_mode = 1;
 
-    if (pcs->scs->static_config.hbd_mds > 0) {
+    // Making hbd-mds>0 only work with high bit depth inputs
+    // This is to make it mergeable in mainline svt-av1
+    if (pcs->scs->static_config.hbd_mds > 0 && scs->encoder_bit_depth > 8) {
         pcs->hbd_md = pcs->scs->static_config.hbd_mds;
     } else if (scs->enable_hbd_mode_decision == DEFAULT) {
         // In svt-av1-hdr, high bit depth mode decisions are enabled by default
@@ -2344,7 +2342,9 @@ void svt_aom_sig_deriv_multi_processes_rtc(SequenceControlSet* scs, PictureParen
     // 1                                     ON
     pcs->frame_end_cdf_update_mode = 1;
 
-    if (scs->enable_hbd_mode_decision == DEFAULT) {
+    if (pcs->scs->static_config.hbd_mds > 0 && scs->encoder_bit_depth > 8) {
+        pcs->hbd_md = pcs->scs->static_config.hbd_mds;
+    } else if (scs->enable_hbd_mode_decision == DEFAULT) {
         if (enc_mode <= ENC_MR) {
             pcs->hbd_md = 1;
         } else if (enc_mode <= ENC_M5) {
@@ -2487,7 +2487,12 @@ void svt_aom_sig_deriv_multi_processes_allintra(SequenceControlSet* scs, Picture
     // 0                                     OFF
     // 1                                     ON
     pcs->frame_end_cdf_update_mode = 1;
-    pcs->max_can_count             = svt_aom_get_max_can_count(enc_mode);
+
+    if (pcs->scs->static_config.hbd_mds > 0 && scs->encoder_bit_depth > 8) {
+        pcs->hbd_md = pcs->scs->static_config.hbd_mds;
+    }
+
+    pcs->max_can_count = svt_aom_get_max_can_count(enc_mode);
 }
 
 /******************************************************
@@ -7391,61 +7396,8 @@ void svt_aom_sig_deriv_enc_dec_light_pd1(PictureControlSet* pcs, ModeDecisionCon
             ctx->lpd1_tx_ctrls.chroma_detector_level = 0;
         }
     }
-
-    /* In modes below M10, only skip non-NEAREST_NEAREST TX b/c skipping all inter TX will cause blocking artifacts
-    in certain clips.  This signal is separated from the general lpd1_tx_ctrls (above) to avoid
-    accidentally turning this on for modes below M13.
-
-    Do not test this signal in M9 and below during preset tuning.  This signal should be kept as an enc_mode check
-    instead of and LPD1_LEVEL check to ensure that M9 and below do not use it.
-    */
-    if (rtc_tune) {
-        if (pcs->enc_mode <= ENC_M8) {
-            ctx->lpd1_skip_inter_tx_level = 0;
-        } else if (pcs->enc_mode <= ENC_M10) {
-            if (lpd1_level <= LPD1_LVL_2) {
-                ctx->lpd1_skip_inter_tx_level = 0;
-            } else {
-                ctx->lpd1_skip_inter_tx_level = 1;
-                if (((l0_was_skip && l1_was_skip && ref_skip_perc > 35) && me_8x8_cost_variance < (800 * picture_qp) &&
-                     me_64x64_distortion < (800 * picture_qp)) ||
-                    (me_8x8_cost_variance < (100 * picture_qp) && me_64x64_distortion < (100 * picture_qp))) {
-                    ctx->lpd1_skip_inter_tx_level = 2;
-                }
-            }
-        } else {
-            assert(pcs->enc_mode >= ENC_M8 && "Only enable this feature for M10+ in RA or M8+ for low delay");
-            if (lpd1_level <= LPD1_LVL_2) {
-                ctx->lpd1_skip_inter_tx_level = 0;
-            } else if (lpd1_level <= LPD1_LVL_4) {
-                ctx->lpd1_skip_inter_tx_level = 1;
-            } else {
-                ctx->lpd1_skip_inter_tx_level = 1;
-                if (((l0_was_skip && l1_was_skip && ref_skip_perc > 35) && me_8x8_cost_variance < (800 * picture_qp) &&
-                     me_64x64_distortion < (800 * picture_qp)) ||
-                    (me_8x8_cost_variance < (100 * picture_qp) && me_64x64_distortion < (100 * picture_qp))) {
-                    ctx->lpd1_skip_inter_tx_level = 2;
-                }
-            }
-        }
-    } else {
-        if (pcs->enc_mode <= ENC_M9) {
-            ctx->lpd1_skip_inter_tx_level = 0;
-        } else {
-            assert(pcs->enc_mode >= ENC_M10 && "Only enable this feature for M10+ in RA or M8+ for low delay");
-            if (lpd1_level <= LPD1_LVL_2) {
-                ctx->lpd1_skip_inter_tx_level = 0;
-            } else {
-                ctx->lpd1_skip_inter_tx_level = 1;
-                if (((l0_was_skip && l1_was_skip && ref_skip_perc > 35) && me_8x8_cost_variance < (800 * picture_qp) &&
-                     me_64x64_distortion < (800 * picture_qp)) ||
-                    (me_8x8_cost_variance < (100 * picture_qp) && me_64x64_distortion < (100 * picture_qp))) {
-                    ctx->lpd1_skip_inter_tx_level = 2;
-                }
-            }
-        }
-    }
-    ctx->lpd1_bypass_tx_th = 0;
+    ctx->lpd1_skip_inter_tx_level = 0;
+    ctx->lpd1_bypass_tx_th        = 0;
     if (rtc_tune) {
         if (lpd1_level <= LPD1_LVL_0) {
             ctx->lpd1_bypass_tx_th = 100;

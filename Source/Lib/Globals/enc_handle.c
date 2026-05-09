@@ -1331,22 +1331,22 @@ EB_API EbErrorType svt_av1_enc_init(EbComponentType* svt_enc_component) {
         input_data.input_resolution = scs->input_resolution;
         input_data.is_scale         = scs->static_config.superres_mode > SUPERRES_NONE ||
             scs->static_config.resize_mode > RESIZE_NONE;
-        input_data.rtc_tune               = scs->static_config.rtc;
-        input_data.variance_octile        = scs->static_config.variance_octile;
-        input_data.adaptive_film_grain    = scs->static_config.adaptive_film_grain;
-        input_data.noise_norm_strength    = scs->static_config.noise_norm_strength;
-        input_data.kf_tf_strength         = scs->static_config.kf_tf_strength;
-        input_data.alt_lambda_factors     = scs->static_config.alt_lambda_factors;
-        input_data.sharp_tx               = scs->static_config.sharp_tx;
-        input_data.alt_ssim_tuning        = scs->static_config.alt_ssim_tuning;
-        input_data.hbd_mds                = scs->static_config.hbd_mds;
-        input_data.tx_bias                = scs->static_config.tx_bias;
-        input_data.complex_hvs            = scs->static_config.complex_hvs;
+        input_data.rtc_tune            = scs->static_config.rtc;
+        input_data.variance_octile     = scs->static_config.variance_octile;
+        input_data.adaptive_film_grain = scs->static_config.adaptive_film_grain;
+        input_data.noise_norm_strength = scs->static_config.noise_norm_strength;
+        input_data.kf_tf_strength      = scs->static_config.kf_tf_strength;
+        input_data.alt_lambda_factors  = scs->static_config.alt_lambda_factors;
+        input_data.sharp_tx            = scs->static_config.sharp_tx;
+        input_data.alt_ssim_tuning     = scs->static_config.alt_ssim_tuning;
+        input_data.hbd_mds             = scs->static_config.hbd_mds;
+        input_data.tx_bias             = scs->static_config.tx_bias;
+        input_data.complex_hvs         = scs->static_config.complex_hvs;
         input_data.tpl_reactiveness_scale = scs->static_config.tpl_reactiveness_scale;
         input_data.tpl_importance_scale   = scs->static_config.tpl_importance_scale;
-        input_data.static_config          = scs->static_config;
-        input_data.allintra               = scs->allintra;
-        input_data.use_flat_ipp           = scs->use_flat_ipp;
+        input_data.static_config       = scs->static_config;
+        input_data.allintra            = scs->allintra;
+        input_data.use_flat_ipp        = scs->use_flat_ipp;
         EB_NEW(enc_handle_ptr->picture_parent_control_set_pool_ptr,
                svt_system_resource_ctor,
                scs->picture_control_set_pool_init_count, //enc_handle_ptr->pcs_pool_total_count,
@@ -3917,23 +3917,33 @@ static void set_param_based_on_input(SequenceControlSet* scs) {
         // Check if film-grain-denoise is also enabled (should be disabled if fgs_table is present)
         if (scs->static_config.film_grain_denoise_strength > 0) {
             SVT_WARN(
-                "Both film-grain-denoise and noise strength were specified; film-grain-denoise will be disabled\n");
+                "Both film-grain-denoise and noise strength were specified; film-grain-denoise will be disabled.\n");
             scs->static_config.film_grain_denoise_strength = 0;
         }
         // Check if fgs_table is present
         if (scs->static_config.fgs_table) {
             SVT_WARN(
-                "Both noise strength and fgs-table were specified; build-in noise table generation will be disabled\n");
-            scs->static_config.noise_strength        = 0;
-            scs->static_config.noise_strength_chroma = -1;
-            scs->static_config.noise_size            = -1;
+                "Both noise strength and fgs-table were specified; build-in noise table generation will be "
+                "disabled.\n");
+            scs->static_config.noise_strength         = 0;
+            scs->static_config.noise_strength_chroma  = -1;
+            scs->static_config.noise_chroma_from_luma = 0;
+            scs->static_config.noise_size             = -1;
         } else {
+            if (scs->static_config.noise_strength_chroma == 0 && scs->static_config.noise_chroma_from_luma == 1) {
+                SVT_WARN("Noise chroma from luma setting has no effect when chroma noise strength is set to 0.\n");
+                scs->static_config.noise_chroma_from_luma = 0;
+            }
             svt_av1_generate_noise_table(&scs->static_config);
         }
     } else {
         if (scs->static_config.noise_strength_chroma != -1) {
             SVT_WARN("Chroma noise strength signal is going to be ignored when noise strength level is 0.\n");
             scs->static_config.noise_strength_chroma = -1;
+        }
+        if (scs->static_config.noise_chroma_from_luma == 1) {
+            SVT_WARN("Noise chroma from luma signal is going to be ignored when noise strength level is 0.\n");
+            scs->static_config.noise_chroma_from_luma = 0;
         }
         if (scs->static_config.noise_size != -1) {
             SVT_WARN("Noise size signal is going to be ignored when noise strength level is 0.\n");
@@ -4251,6 +4261,7 @@ static void copy_api_from_app(SequenceControlSet* scs, EbSvtAv1EncConfiguration*
     scs->static_config.fgs_table              = config_struct->fgs_table;
     scs->static_config.noise_strength         = config_struct->noise_strength;
     scs->static_config.noise_strength_chroma  = config_struct->noise_strength_chroma;
+    scs->static_config.noise_chroma_from_luma = config_struct->noise_chroma_from_luma;
     scs->static_config.noise_size             = config_struct->noise_size;
 
     // MD Parameters
@@ -4605,7 +4616,6 @@ static void copy_api_from_app(SequenceControlSet* scs, EbSvtAv1EncConfiguration*
     // TPL tuning parameters
     scs->static_config.tpl_reactiveness_scale = config_struct->tpl_reactiveness_scale;
     scs->static_config.tpl_importance_scale   = config_struct->tpl_importance_scale;
-
     // Override settings for Still IQ tune
     if (scs->static_config.tune == TUNE_IQ) {
         SVT_WARN(
