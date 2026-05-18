@@ -227,6 +227,8 @@
 #define NOISE_ADAPTIVE_FILTERING_TOKEN "--noise-adaptive-filtering"
 #define CDEF_SCALING_TOKEN "--cdef-scaling"
 #define ENABLE_DAALA_TOKEN "--enable-daala"
+#define ENABLE_DAALA_RD_TOKEN "--enable-daala-rd"
+#define ENABLE_DAALA_FILTERING_TOKEN "--enable-daala-filtering"
 #define TPL_REACTIVENESS_SCALE_TOKEN "--tpl-reactiveness-scale"
 #define TPL_IMPORTANCE_SCALE_TOKEN "--tpl-importance-scale"
 
@@ -1119,6 +1121,8 @@ ConfigDescription config_entry_psychovisual[] = {
     {CDEF_SCALING_TOKEN,
      "Controls scaling of the CDEF strength computation, default is 15 (1x scaling) [1: minimum, 8: ~0.5x, 30: 2x]"},
     {ENABLE_DAALA_TOKEN, "Enable Daala distortion metric, default is 0 [0-4]"},
+    {ENABLE_DAALA_RD_TOKEN, "Enable Daala distortion in model RD curvfit, default is 0 [0-1]"},
+    {ENABLE_DAALA_FILTERING_TOKEN, "Enable Daala distortion in filtering decisions, default is 0 [0-3]"},
     // TPL tuning parameters
     {TPL_REACTIVENESS_SCALE_TOKEN, "TPL reactiveness scale for short-lasting content, default is 1.0 [0.0-10.0]"},
     {TPL_IMPORTANCE_SCALE_TOKEN, "TPL importance scale for long-lasting content, default is 1.0 [0.0-10.0]"},
@@ -1247,6 +1251,8 @@ ConfigEntry config_entry[] = {
     {FAST_DECODE_TOKEN, "FastDecode", set_cfg_generic_token},
     {TUNE_TOKEN, "Tune", set_cfg_generic_token},
     {ENABLE_DAALA_TOKEN, "EnableDaala", set_cfg_generic_token},
+    {ENABLE_DAALA_RD_TOKEN, "EnableDaalaRd", set_cfg_generic_token},
+    {ENABLE_DAALA_FILTERING_TOKEN, "EnableDaalaFiltering", set_cfg_generic_token},
     //   ALT-REF filtering support
     {ENABLE_TF_TOKEN, "EnableTf", set_cfg_generic_token},
     {ENABLE_OVERLAYS, "EnableOverlays", set_cfg_generic_token},

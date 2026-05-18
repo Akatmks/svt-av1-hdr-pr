@@ -4612,6 +4612,8 @@ static void copy_api_from_app(SequenceControlSet* scs, EbSvtAv1EncConfiguration*
 
     // Daala
     scs->static_config.enable_daala = config_struct->enable_daala;
+    scs->static_config.enable_daala_rd = config_struct->enable_daala_rd;
+    scs->static_config.enable_daala_filtering = config_struct->enable_daala_filtering;
 
     // TPL tuning parameters
     scs->static_config.tpl_reactiveness_scale = config_struct->tpl_reactiveness_scale;

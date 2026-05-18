@@ -672,6 +672,22 @@ typedef struct EbSvtAv1EncConfiguration {
      */
     uint8_t enable_daala;
 
+    /**
+     * @brief Enable Daala distortion in model RD curvfit for inter-intra mode selection.
+     * 0 = off, 1 = on
+     * Default is 0.
+     */
+    uint8_t enable_daala_rd;
+
+    /**
+     * @brief Enable Daala distortion in in-loop filtering decisions.
+     * 0 = disabled (default)
+     * 1 = loop restoration
+     * 2 = loop restoration + temporal filtering
+     * 3 = loop restoration + temporal filtering + deblocking
+     */
+    uint8_t enable_daala_filtering;
+
     // super-resolution parameters
     uint8_t superres_mode;
     uint8_t superres_denom;
@@ -1142,7 +1158,7 @@ typedef struct EbSvtAv1EncConfiguration {
     uint8_t padding[128 - sizeof(PredStructure) +
                     sizeof(uint8_t) // pred_strucutre type was changed from uint8_t to PredStructure
                     /* SVT-AV1-HDR additions */
-                    - (sizeof(uint8_t) * 10) - (sizeof(int8_t) * 1) - (sizeof(int32_t) * 1) - (sizeof(bool) * 3) -
+                    - (sizeof(uint8_t) * 12) - (sizeof(int8_t) * 1) - (sizeof(int32_t) * 1) - (sizeof(bool) * 3) -
                     (sizeof(double) * 3)];
     // clang-format on
 } EbSvtAv1EncConfiguration;
