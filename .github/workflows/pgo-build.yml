@@ -21,7 +21,7 @@ jobs:
     - id: generate-tag
       run: echo tag=pgo-build-$(git log -1 "--date=format:%F" "--format=%ad-%h") >> "$GITHUB_OUTPUT"
     - id: generate-name
-      run: echo name=$(git log -1 "--date=format:%F" "--format=%ad %H") >> "$GITHUB_OUTPUT"
+      run: echo name=$(git log -1 "--date=format:%F" "--format=%ad %h") >> "$GITHUB_OUTPUT"
 
 
   release:
