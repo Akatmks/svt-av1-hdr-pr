@@ -18,7 +18,7 @@ jobs:
     steps:
     - uses: actions/checkout@v7
     - id: generate
-      run: echo tag=v$(git log -1 "--date=format:%F" "--format=%ad-%h") >> "$GITHUB_OUTPUT"
+      run: echo tag=$(git log -1 "--date=format:%F" "--format=%ad-%h") >> "$GITHUB_OUTPUT"
 
 
   release:
