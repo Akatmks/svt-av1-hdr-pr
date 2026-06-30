@@ -77,9 +77,7 @@ jobs:
           mingw-w64-ucrt-x86_64-ffmpeg
     - run: fastfetch
     - uses: actions/checkout@v7
-      with:
-        fetch-depth: 200
-        fetch-tags: "true"
+    - run: git fetch --tags --depth 200
     - run: mkdir FoodMarket2 && curl -L "https://media.xiph.org/video/derf/webm/Netflix_FoodMarket2_4096x2160_60fps_10bit_420.webm" -o FoodMarket2/FoodMarket2.webm
     - run: ffmpeg -y -i FoodMarket2/FoodMarket2.webm -vf "select=between(n\,78\,110)" -strict -1 -f yuv4mpegpipe -pix_fmt yuv420p10le FoodMarket2/FoodMarket2.y4m
     - uses: ilammy/setup-nasm@v1
@@ -156,9 +154,7 @@ jobs:
           mingw-w64-clang-aarch64-ffmpeg
     - run: fastfetch
     - uses: actions/checkout@v7
-      with:
-        fetch-depth: 200
-        fetch-tags: "true"
+    - run: git fetch --tags --depth 200
     - run: mkdir FoodMarket2 && curl -L "https://media.xiph.org/video/derf/webm/Netflix_FoodMarket2_4096x2160_60fps_10bit_420.webm" -o FoodMarket2/FoodMarket2.webm
     - run: ffmpeg -y -i FoodMarket2/FoodMarket2.webm -vf "select=between(n\,78\,110)" -strict -1 -f yuv4mpegpipe -pix_fmt yuv420p10le FoodMarket2/FoodMarket2.y4m
     - id: install-llvm-30
@@ -256,9 +252,7 @@ jobs:
         apt: neofetch ffmpeg
     - run: neofetch
     - uses: actions/checkout@v7
-      with:
-        fetch-depth: 200
-        fetch-tags: "true"
+    - run: git fetch --tags --depth 200
     - run: mkdir FoodMarket2 && curl -L "https://media.xiph.org/video/derf/webm/Netflix_FoodMarket2_4096x2160_60fps_10bit_420.webm" -o FoodMarket2/FoodMarket2.webm
     - run: ffmpeg -y -i FoodMarket2/FoodMarket2.webm -vf "select=between(n\,78\,110)" -strict -1 -f yuv4mpegpipe -pix_fmt yuv420p10le FoodMarket2/FoodMarket2.y4m
     - uses: ilammy/setup-nasm@v1
@@ -308,9 +302,7 @@ jobs:
         brew: fastfetch ffmpeg
     - run: fastfetch
     - uses: actions/checkout@v7
-      with:
-        fetch-depth: 200
-        fetch-tags: "true"
+    - run: git fetch --tags --depth 200
     - run: mkdir FoodMarket2 && curl -L "https://media.xiph.org/video/derf/webm/Netflix_FoodMarket2_4096x2160_60fps_10bit_420.webm" -o FoodMarket2/FoodMarket2.webm
     - run: ffmpeg -y -i FoodMarket2/FoodMarket2.webm -vf "select=between(n\,78\,110)" -strict -1 -f yuv4mpegpipe -pix_fmt yuv420p10le FoodMarket2/FoodMarket2.y4m
     - uses: ConorMacBride/install-package@v1
@@ -334,9 +326,7 @@ jobs:
         brew: fastfetch ffmpeg
     - run: fastfetch
     - uses: actions/checkout@v7
-      with:
-        fetch-depth: 200
-        fetch-tags: "true"
+    - run: git fetch --tags --depth 200
     - run: mkdir FoodMarket2 && curl -L "https://media.xiph.org/video/derf/webm/Netflix_FoodMarket2_4096x2160_60fps_10bit_420.webm" -o FoodMarket2/FoodMarket2.webm
     - run: ffmpeg -y -i FoodMarket2/FoodMarket2.webm -vf "select=between(n\,78\,110)" -strict -1 -f yuv4mpegpipe -pix_fmt yuv420p10le FoodMarket2/FoodMarket2.y4m
     - uses: ilammy/setup-nasm@v1
