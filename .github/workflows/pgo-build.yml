@@ -18,7 +18,8 @@ jobs:
     steps:
     - uses: actions/checkout@v7
     - id: generate
-      run: echo tag=$(git log -1 "--date=format:%F" "--format=%ad-%h") >> "$GITHUB_OUTPUT"
+      run: echo name=$(git log -1 "--date=format:%F" "--format=%ad %H") >> "$GITHUB_OUTPUT"
+      run: echo tag=pgo-build-$(git log -1 "--date=format:%F" "--format=%ad-%h") >> "$GITHUB_OUTPUT"
 
 
   release:
@@ -33,9 +34,9 @@ jobs:
     - run: git restore -s ${{ github.sha }} . && git add --all && git commit --allow-empty -m ${{ needs.tag.outputs.tag }} && git push origin pgo-build-tags
     - uses: softprops/action-gh-release@v3
       with:
-        tag_name: pgo-build-${{ needs.tag.outputs.tag }}
+        tag_name: ${{ needs.tag.outputs.tag }}
         target_commitish: pgo-build-tags
-        name: SVT-AV1-HDR ${{ needs.tag.outputs.tag }}
+        name: SVT-AV1-HDR ${{ needs.tag.outputs.name }}
         body: |
           Windows | x86-64 | LLVM Project Clang LLD | winthread | `icelake-server` + `znver5` | LTO PGO  
           Windows | x86-64 | LLVM Project Clang LLD | winthread | `znver2` | LTO PGO  
