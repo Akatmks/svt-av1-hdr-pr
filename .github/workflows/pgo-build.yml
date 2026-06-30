@@ -30,7 +30,7 @@ jobs:
         ref: "refs/heads/pgo-build-tags"
     - run: git config user.email Akatsumekusa@protonmail.com && git config user.name "Akatsumekusa"
     - run: git fetch --depth=1 origin ${{ github.ref }}
-    - run: git restore -s ${{ github.sha }} . && git add --all && git commit --allow-empty --allow-empty-message && git push origin pgo-build-tags
+    - run: git restore -s ${{ github.sha }} . && git add --all && git commit --allow-empty -m ${{ needs.tag.outputs.tag }} && git push origin pgo-build-tags
     - uses: softprops/action-gh-release@v3
       with:
         tag_name: pgo-build-${{ needs.tag.outputs.tag }}
