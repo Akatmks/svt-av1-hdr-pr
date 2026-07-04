@@ -1177,7 +1177,8 @@ typedef struct EbSvtAv1EncConfiguration {
                     sizeof(uint8_t) // pred_strucutre type was changed from uint8_t to PredStructure
                     /* SVT-AV1-HDR additions */
                     - (sizeof(uint8_t) * 13) - (sizeof(int8_t) * 1) - (sizeof(int32_t) * 2) - (sizeof(bool) * 6) -
-                    (sizeof(double)) - sizeof(SvtAv1QualityZone*) - sizeof(uint16_t)];
+                    (sizeof(double)) - sizeof(SvtAv1QualityZone*) - sizeof(uint16_t) -
+                    6 /* implicit alignment padding */];
     // clang-format on
 } EbSvtAv1EncConfiguration;
 
