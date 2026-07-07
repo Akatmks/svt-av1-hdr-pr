@@ -1334,6 +1334,14 @@ EB_API EbErrorType svt_av1_enc_init(EbComponentType* svt_enc_component) {
         input_data.rtc_tune            = scs->static_config.rtc;
         input_data.variance_octile     = scs->static_config.variance_octile;
         input_data.adaptive_film_grain = scs->static_config.adaptive_film_grain;
+        input_data.noise_norm_strength = scs->static_config.noise_norm_strength;
+        input_data.kf_tf_strength      = scs->static_config.kf_tf_strength;
+        input_data.alt_lambda_factors  = scs->static_config.alt_lambda_factors;
+        input_data.sharp_tx            = scs->static_config.sharp_tx;
+        input_data.alt_ssim_tuning     = scs->static_config.alt_ssim_tuning;
+        input_data.hbd_mds             = scs->static_config.hbd_mds;
+        input_data.tx_bias             = scs->static_config.tx_bias;
+        input_data.complex_hvs         = scs->static_config.complex_hvs;
         input_data.static_config       = scs->static_config;
         input_data.allintra            = scs->allintra;
         input_data.use_flat_ipp        = scs->use_flat_ipp;
@@ -2196,30 +2204,6 @@ static int32_t compute_default_intra_period(SequenceControlSet* scs) {
     }
 
     return intra_period;
-}
-
-static int32_t compute_default_min_intra_period(SequenceControlSet* scs) {
-    EbSvtAv1EncConfiguration* config = &scs->static_config;
-
-    double  fps           = scs->frame_rate;
-    int32_t mini_gop_size = (1 << (config->hierarchical_levels));
-
-    // If mini_gop_size = 32, pretend that the minigop size is 16 instead
-    // The calculated intra period will result in either one of these outcomes:
-    // - min_intra_period is mod 16: every minigop will be 32 except the very last one (i.e. 16)
-    // - min_intra_period is mod 32: every minigop will be 32 including the very last one
-    if (mini_gop_size == 32) {
-        mini_gop_size = 16;
-    }
-
-    // ~1-sec min-intra
-    int32_t min_intra_period = (((int)(fps + mini_gop_size - 1) / mini_gop_size) * (mini_gop_size));
-
-    if (config->intra_refresh_type == 1) {
-        min_intra_period -= 1;
-    }
-
-    return min_intra_period;
 }
 
 /*
@@ -3913,28 +3897,6 @@ static void set_param_based_on_input(SequenceControlSet* scs) {
             "Aggressive Variance Boost strength used. This is a curve that's only useful under specific situations. "
             "Use with caution!\n");
     }
-    if (scs->static_config.enable_daala >= 1 && scs->static_config.cdef_level != 0) {
-        if (scs->static_config.alt_cdef) {
-            SVT_WARN("Daala CDEF is enabled; alt-cdef will be disabled.\n");
-            scs->static_config.alt_cdef = 0;
-        }
-        if (scs->static_config.cdef_scaling != 15) {
-            SVT_WARN("Daala CDEF is enabled; cdef-scaling will be ignored.\n");
-            scs->static_config.cdef_scaling = 15;
-        }
-    }
-    if (scs->static_config.cdef_level != 0 && scs->static_config.alt_cdef > 1 && !(scs->static_config.pred_structure == LOW_DELAY)) {
-        SVT_WARN("CDEF level is set to 1, or full CDEF decision, when alt-cdef is >= 2\n");
-        scs->static_config.cdef_level = 1;
-    }
-    if (scs->static_config.alt_cdef && scs->static_config.cdef_scaling != 15) {
-        SVT_WARN("alt-cdef is enabled; cdef-scaling will be ignored.\n");
-        scs->static_config.cdef_scaling = 15;
-    }
-    if (scs->static_config.enable_dlf_flag != 0 && scs->static_config.alt_dlf > 1 && !(scs->static_config.pred_structure == LOW_DELAY)) {
-        SVT_WARN("DLF level is set to 1, or full DLF decision, when alt-dlf is >= 2\n");
-        scs->static_config.enable_dlf_flag = 3;
-    }
     if (scs->static_config.max_tx_size == 32 && scs->static_config.qp >= 25 && scs->static_config.tune != 3) {
         SVT_WARN(
             "Restricting transform sizes to a max of 32x32 might reduce coding efficiency at low to medium fidelity "
@@ -4115,6 +4077,10 @@ static void set_param_based_on_input(SequenceControlSet* scs) {
         scs->enable_hbd_mode_decision = 0;
     }
 
+    // Throws a warning when scene change is on, as the feature is not optimal and may produce false detections
+    if (scs->static_config.scene_change_detection == 1) {
+        SVT_WARN("Scene Change is not optimal and may produce suboptimal keyframe placements\n");
+    }
     // MRP level
     uint8_t mrp_level;
     if (scs->static_config.rtc) {
@@ -4189,7 +4155,6 @@ static void copy_api_from_app(SequenceControlSet* scs, EbSvtAv1EncConfiguration*
     // Padding Offsets
     scs->b64_size                          = 64;
     scs->static_config.intra_period_length = config_struct->intra_period_length;
-    scs->static_config.min_intra_period_length = config_struct->min_intra_period_length;
     scs->static_config.avif                = config_struct->avif;
     scs->allintra                          = (scs->static_config.intra_period_length == 0 || scs->static_config.avif ||
                      scs->static_config.pred_structure == ALL_INTRA);
@@ -4298,17 +4263,12 @@ static void copy_api_from_app(SequenceControlSet* scs, EbSvtAv1EncConfiguration*
 
     // MD Parameters
     scs->enable_hbd_mode_decision = config_struct->encoder_bit_depth > 8 ? DEFAULT : 0;
-    // Auto tiling
-    scs->static_config.auto_tiling = config_struct->auto_tiling;
     {
         if (config_struct->tile_rows == DEFAULT && config_struct->tile_columns == DEFAULT) {
             scs->static_config.tile_rows    = 0;
             scs->static_config.tile_columns = 0;
 
         } else {
-            if (scs->static_config.auto_tiling) {
-                SVT_WARN("Tiles set manually will be ignored when auto tiling is enabled!\n");
-            }
             if (config_struct->tile_rows == DEFAULT) {
                 scs->static_config.tile_rows    = 0;
                 scs->static_config.tile_columns = config_struct->tile_columns;
@@ -4320,23 +4280,7 @@ static void copy_api_from_app(SequenceControlSet* scs, EbSvtAv1EncConfiguration*
                 scs->static_config.tile_columns = config_struct->tile_columns;
             }
         }
-        if (scs->static_config.auto_tiling) {
-            uint32_t max_dim = scs->max_input_luma_width > scs->max_input_luma_height ?
-                               scs->max_input_luma_width : scs->max_input_luma_height;
-            bool is_vertical = scs->max_input_luma_height > scs->max_input_luma_width;
-
-            if (max_dim >= 3840) {
-                scs->static_config.tile_rows = is_vertical ? 2 : 0;
-                scs->static_config.tile_columns = is_vertical ? 0 : 2;
-            }
-            else if (max_dim >= 1920) {
-                scs->static_config.tile_rows = is_vertical ? 1 : 0;
-                scs->static_config.tile_columns = is_vertical ? 0 : 1;
-            }
-        }
     }
-
-    scs->static_config.low_memory = config_struct->low_memory;
 
     // Rate Control
     scs->static_config.scene_change_detection = config_struct->scene_change_detection;
@@ -4360,17 +4304,7 @@ static void copy_api_from_app(SequenceControlSet* scs, EbSvtAv1EncConfiguration*
         // Mimic flat prediction structure
         scs->use_flat_ipp = 1;
     }
-    // Set hierarchical_levels to 2 to reduce memory allocation; 2 is the minimum currently supported
-    if (scs->allintra) {
-        scs->static_config.hierarchical_levels = 2;
-    } else if (scs->static_config.low_memory) {
-        scs->lad_mg = 0;
-        if (scs->static_config.hierarchical_levels == HIERARCHICAL_LEVELS_AUTO) {
-            scs->static_config.hierarchical_levels = 4;
-        }
-        SVT_WARN("Low memory mode active. Reducing --lp can decrease memory usage further at the cost of speed.\n");
-    }
-    // Set the default hierarchical levels otherwise
+    // Set the default hierarchical levels
     if (scs->static_config.hierarchical_levels == HIERARCHICAL_LEVELS_AUTO) {
         scs->static_config.hierarchical_levels = scs->static_config.pred_structure == LOW_DELAY &&
                 (scs->static_config.rate_control_mode == SVT_AV1_RC_MODE_CBR ||
@@ -4390,6 +4324,10 @@ static void copy_api_from_app(SequenceControlSet* scs, EbSvtAv1EncConfiguration*
             scs->static_config.hierarchical_levels = 2;
             SVT_WARN("Forced Low delay CBR mode to use HierarchicalLevels = 2\n");
         }
+    }
+    // Set hierarchical_levels to 2 to reduce memory allocation; 2 is the minimum currently supported
+    if (scs->allintra) {
+        scs->static_config.hierarchical_levels = 2;
     }
     scs->max_temporal_layers                  = scs->static_config.hierarchical_levels;
     scs->static_config.look_ahead_distance    = config_struct->look_ahead_distance;
@@ -4492,13 +4430,6 @@ static void copy_api_from_app(SequenceControlSet* scs, EbSvtAv1EncConfiguration*
     } else if (scs->static_config.multiply_keyint) {
         const double fps = (double)scs->static_config.frame_rate_numerator / scs->static_config.frame_rate_denominator;
         scs->static_config.intra_period_length = (int32_t)(fps * scs->static_config.intra_period_length);
-    }
-    if (scs->static_config.intra_period_length == -1 || scs->allintra) {
-        scs->static_config.min_intra_period_length = 0;
-    } else {
-        if (scs->static_config.min_intra_period_length == -1) {
-            scs->static_config.min_intra_period_length = compute_default_min_intra_period(scs);
-        }
     }
     if (scs->static_config.look_ahead_distance == (uint32_t)~0) {
         scs->static_config.look_ahead_distance = compute_default_look_ahead(&scs->static_config);
@@ -4676,28 +4607,6 @@ static void copy_api_from_app(SequenceControlSet* scs, EbSvtAv1EncConfiguration*
     // CDEF scaling
     scs->static_config.cdef_scaling = config_struct->cdef_scaling;
 
-    // Alt CDEF
-    scs->static_config.alt_cdef = config_struct->alt_cdef;
-
-    // Alt DLF
-    scs->static_config.alt_dlf = config_struct->alt_dlf;
-
-    // Daala
-    scs->static_config.enable_daala = config_struct->enable_daala;
-
-    // Zones
-    if (config_struct->quality_zones && config_struct->num_zones > 0) {
-        EB_NO_THROW_MALLOC(scs->static_config.quality_zones, sizeof(SvtAv1QualityZone) * config_struct->num_zones);
-        memcpy(scs->static_config.quality_zones,
-               config_struct->quality_zones,
-               sizeof(SvtAv1QualityZone) * config_struct->num_zones);
-    } else {
-        scs->static_config.quality_zones = NULL;
-    }
-    scs->static_config.num_zones = config_struct->num_zones;
-
-    scs->static_config.hide_banner = config_struct->hide_banner;
-
     // Override settings for Still IQ tune
     if (scs->static_config.tune == TUNE_IQ) {
         SVT_WARN(
@@ -4810,9 +4719,7 @@ EB_API EbErrorType svt_av1_enc_set_parameter(EbComponentType*          svt_enc_c
     }
     return_error = load_default_buffer_configuration_settings(scs);
 
-    if (!scs->static_config.hide_banner) {
-        svt_av1_print_lib_params(scs);
-    }
+    svt_av1_print_lib_params(scs);
 
     // free frame scale events after copy to encoder
     if (config_struct->frame_scale_evts.resize_denoms) {
@@ -4837,12 +4744,6 @@ EB_API EbErrorType svt_av1_enc_set_parameter(EbComponentType*          svt_enc_c
         EB_FREE(config_struct->sframe_posi.sframe_posis);
     }
     memset(&config_struct->sframe_posi, 0, sizeof(SvtAv1SFramePositions));
-
-    if (config_struct->quality_zones) {
-        EB_FREE(config_struct->quality_zones);
-    }
-    config_struct->quality_zones = NULL;
-    config_struct->num_zones     = 0;
 
     return return_error;
 }
@@ -5684,7 +5585,7 @@ EB_API const char* svt_hdr_get_version(void) {
 
 EB_API void svt_av1_print_version(void) {
     SVT_INFO("-------------------------------------------\n");
-    SVT_INFO("SVT [version]:\tSVT-AV1-Tritium Encoder Lib %s \"Chromedome\"\n", SVT_AV1_CVS_VERSION);
+    SVT_INFO("SVT [version]:\tSVT-AV1-HDR Encoder Lib %s \"Chromedome\"\n", SVT_AV1_CVS_VERSION);
     const char* compiler =
 #if defined(__clang__) && defined(__apple_build_version__)
         __VERSION__ "\t"

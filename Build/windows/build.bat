@@ -15,10 +15,10 @@ cd /d "%~dp0"
 
 :: Set defaults to prevent inheriting
 set "build=y"
-:: Default is Release
-set "buildtype=Release"
-:: Default is static
-set "shared=OFF"
+:: Default is debug
+set "buildtype=Debug"
+:: Default is shared
+set "shared=ON"
 set "GENERATOR="
 :: (cmake -G 2>&1 | Select-String -SimpleMatch '*').Line.Split('=')[0].TrimEnd().Replace('* ','')
 :: Default is not building unit tests
@@ -41,9 +41,7 @@ if "%shared%"=="ON" (
 
 if "%unittest%"=="ON" echo Building unit tests
 
-if /I "%GENERATOR:"=%"=="-GNinja" (
-    cmake ../.. %GENERATOR% -DCMAKE_BUILD_TYPE=%buildtype% -DCMAKE_INSTALL_PREFIX=%SYSTEMDRIVE%\svt-encoders -DBUILD_SHARED_LIBS=%shared% -DBUILD_TESTING=%unittest% %cmake_eflags% || exit /b 1
-) else if "%vs%"=="2019" (
+if "%vs%"=="2019" (
     cmake ../.. %GENERATOR% -A x64 -DCMAKE_INSTALL_PREFIX=%SYSTEMDRIVE%\svt-encoders -DBUILD_SHARED_LIBS=%shared% -DBUILD_TESTING=%unittest% %cmake_eflags% || exit /b 1
 ) else if "%vs%"=="2022" (
     cmake ../.. %GENERATOR% -A x64 -DCMAKE_INSTALL_PREFIX=%SYSTEMDRIVE%\svt-encoders -DBUILD_SHARED_LIBS=%shared% -DBUILD_TESTING=%unittest% %cmake_eflags% || exit /b 1
@@ -133,12 +131,6 @@ if -%1-==-- (
     echo This is currently not officially supported
     set "GENERATOR=Unix Makefiles"
     shift
-) else if /I "%1"=="clang" (
-    echo Setting environment for Clang with Ninja
-    set "GENERATOR=Ninja"
-    set "CC=clang"
-    set "CXX=clang"
-    shift
 ) else if /I "%1"=="release" (
     set "buildtype=Release"
     shift
@@ -178,9 +170,6 @@ if -%1-==-- (
 ) else if /I "%1"=="lto" (
     set "cmake_eflags=%cmake_eflags% -DSVT_AV1_LTO=ON"
     shift
-) else if /I "%1"=="no-lto" (
-    set "cmake_eflags=%cmake_eflags% -DSVT_AV1_LTO=OFF"
-    shift
 ) else if /I "%1"=="no-enc" (
     set "cmake_eflags=%cmake_eflags% -DBUILD_ENC=OFF"
     shift
@@ -196,6 +185,6 @@ goto :args
 
 :help
     echo Batch file to build SVT-AV1 on Windows
-    echo Usage: build.bat [2022^|2019^|2017^|2015^|clean] [release^|debug] [nobuild] [test] [shared^|static] [c-only] [no-avx512] [enable-libdovi] [enable-libhdr10plus] [ext-lib-static] [no-apps] [lto] [no-lto] [no-enc]
+    echo Usage: build.bat [2022^|2019^|2017^|2015^|clean] [release^|debug] [nobuild] [test] [shared^|static] [c-only] [no-avx512] [enable-libdovi] [enable-libhdr10plus] [ext-lib-static] [no-apps] [no-enc]
     exit /b 1
 goto :EOF
