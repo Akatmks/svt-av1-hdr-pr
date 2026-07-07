@@ -2020,6 +2020,21 @@ static void model_rd_for_sb(PictureControlSet* pcs, EbPictureBufferDesc* predict
         const uint8_t   current_q_index = pcs->ppcs->frm_hdr.quantization_params.base_q_idx;
         Dequants* const dequants        = ctx->hbd_md ? &scs->enc_ctx->deq_bd : &scs->enc_ctx->deq_8bit;
         int16_t         quantizer       = dequants->y_dequant_qtx[current_q_index][1];
+
+        if (ctx->tune_daala_level >= 4 && plane == 0) {
+            sse = svt_spatial_full_distortion_daala_kernel(input_pic->buffer[plane],
+                                                            input_offset,
+                                                            input_pic->stride[plane],
+                                                            prediction_ptr->buffer[plane],
+                                                            0,
+                                                            prediction_ptr->stride[plane],
+                                                            plane ? ctx->blk_geom->bwidth_uv : ctx->blk_geom->bwidth,
+                                                            plane ? ctx->blk_geom->bheight_uv : ctx->blk_geom->bheight,
+                                                            bit_depth,
+                                                            current_q_index,
+                                                            1);
+        }
+
         model_rd_from_sse(plane == 0 ? ctx->blk_geom->bsize : ctx->blk_geom->bsize_uv,
                           quantizer,
                           bit_depth,
@@ -2510,7 +2525,7 @@ static void enc_make_inter_predictor_light_pd0(uint8_t* src, uint8_t* dst, Subpe
     svt_inter_predictor_light_pd0(src, src_stride, dst, dst_stride, blk_width, blk_height, subpel_params, conv_params);
 }
 
-void NOINLINE svt_aom_enc_make_inter_predictor(
+void svt_aom_enc_make_inter_predictor(
     SequenceControlSet* scs, uint8_t* src_ptr, uint8_t* src_ptr_2b, uint8_t* dst_ptr, int16_t pre_y, int16_t pre_x,
     Mv mv, const struct ScaleFactors* const sf, ConvolveParams* conv_params, InterpFilters interp_filters,
     const InterInterCompoundData* const interinter_comp, uint8_t* seg_mask, uint16_t frame_width, uint16_t frame_height,
