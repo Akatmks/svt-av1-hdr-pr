@@ -206,6 +206,13 @@ typedef struct SvtAv1SFramePositions {
     int8_t*   sframe_qp_offsets;
 } SvtAv1SFramePositions;
 
+typedef struct SvtAv1QualityZone {
+    uint32_t start_frame; // inclusive
+    uint32_t end_frame; // inclusive
+    int      zone_baseq; // base CRF/CQP value for this zone
+    int      zone_qsidx; // quarter step index
+} SvtAv1QualityZone;
+
 // Will contain the EbEncApi which will live in the EncHandle class
 // Only modifiable during config-time.
 typedef struct EbSvtAv1EncConfiguration {
@@ -235,6 +242,7 @@ typedef struct EbSvtAv1EncConfiguration {
      *
      * Default is -2. */
     int32_t intra_period_length;
+
 
     /* Random access.
      *
@@ -558,6 +566,7 @@ typedef struct EbSvtAv1EncConfiguration {
      * 0: disabled
      * 1: enabled
      * 2: more accurate (slower)
+     * 3: most accurate (very slow)
      */
     uint8_t enable_dlf_flag;
 
@@ -642,6 +651,7 @@ typedef struct EbSvtAv1EncConfiguration {
      * 0 = off
      * 1 = on
      * 2 = adaptive
+     * 3 = full
      * Default is 1. */
     uint8_t enable_tf;
 
@@ -1099,12 +1109,76 @@ typedef struct EbSvtAv1EncConfiguration {
      */
     bool color_range_provided;
 
+    /* The min intra period defines the interval of frames before which a new
+     * Intra refresh can be inserted. It is strongly recommended to set the
+     * value to a multiple of the mini-gop size.
+     *
+     *  0 = no minimum (only relevant when scd=1).
+     * -1 = auto.
+     *
+     * Default is -1. */
+    int32_t min_intra_period_length;
+
+    /**
+     * @brief Signal to the library to automatically adjust tiles
+     *
+     * Default is true.
+     */
+    bool auto_tiling;
+
+    /* @brief Quality zones configuration
+     *
+     * Default is no zones.
+     */
+    SvtAv1QualityZone* quality_zones;
+    uint16_t           num_zones;
+
+    /**
+     * @brief Enable alternative CDEF biases
+     * 0: disabled
+     * 1-3: enabled
+     * Default is 0
+     */
+    uint8_t alt_cdef;
+
+    /**
+     * @brief Enable alternative DLF biases
+     * 0: disabled
+     * 1-3: enabled
+     * Default is 0
+     */
+    uint8_t alt_dlf;
+
+    /**
+     * @brief Enable Daala distortion metric.
+     * 0 = OFF
+     * 1 = CDEF
+     * 2 = 1 + TX Search + MDS3 Selection
+     * 3 = 2 + DCT TX
+     * 4 = 3 + MDS0 + IFS RD + OBMC
+     * Default is 0.
+     */
+    uint8_t enable_daala;
+
+    /* @brief use settings which reduce memory usage
+     *
+     * Default is false.
+     */
+    bool low_memory;
+
+    /* @brief do not print encoder parameters
+     *
+     * Default is false.
+     */
+    bool hide_banner;
+
     /*Add 128 Byte Padding to Struct to avoid changing the size of the public configuration struct*/
     uint8_t padding[128 - sizeof(PredStructure) +
                     sizeof(uint8_t) // pred_strucutre type was changed from uint8_t to PredStructure
                     /* SVT-AV1-HDR additions */
-                    - (sizeof(uint8_t) * 10) - (sizeof(int8_t) * 1) - (sizeof(int32_t) * 1) - (sizeof(bool) * 3) -
-                    (sizeof(double))];
+                    - (sizeof(uint8_t) * 13) - (sizeof(int8_t) * 1) - (sizeof(int32_t) * 2) - (sizeof(bool) * 6) -
+                    (sizeof(double)) - sizeof(SvtAv1QualityZone*) - sizeof(uint16_t) -
+                    6 /* implicit alignment padding */];
     // clang-format on
 } EbSvtAv1EncConfiguration;
 
