@@ -7,6 +7,8 @@ SVT-AV1-HDR is the Scalable Video Technology for AV1 (SVT-AV1 Encoder) with perc
 
 Currently, there are [HandBrake](https://github.com/Uranite/HandBrake-SVT-AV1-HDR?tab=readme-ov-file#downloads-and-build-status) and [ffmpeg](https://github.com/QuickFatHedgehog/FFmpeg-Builds-SVT-AV1-HDR/releases) **community builds** with SVT-AV1-HDR available.
 
+Additionally, standalone EncApp builds optimized with LTO + PGO can be found [here](https://github.com/juliobbv-p/svt-av1-hdr/releases), provided by @Akatmks's [GitHub Action](https://github.com/Akatmks/build-svt-av1).
+
 ## Quick Overview
 
 SVT-AV1-HDR's defaults were chosen to strike a good balance between **detail retention** and **artifact prevention** across a wide variety of content (e.g. live action, animation and screen recordings).
@@ -132,7 +134,7 @@ Terrifically slow encoding modes for research purposes.
 
 - `--sharpness` *0 to 7* (**[Merged to Mainline](https://gitlab.com/AOMediaCodec/SVT-AV1/-/merge_requests/2346)**)
 
-A parameter for modifying loopfilter deblock sharpness and rate distortion to improve visual fidelity. The default is 0 (no sharpness).
+A parameter for modifying loopfilter deblock sharpness and rate distortion to improve visual fidelity. The default is 1.
 
 - `--dolby-vision-rpu` *path to file*
 
