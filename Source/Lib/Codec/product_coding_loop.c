@@ -1,4 +1,4 @@
-﻿/*
+/*
 * Copyright(c) 2019 Intel Corporation
 * Copyright (c) 2016, Alliance for Open Media. All rights reserved
 *
@@ -1009,7 +1009,7 @@ static void fast_loop_core_light_pd0(ModeDecisionCandidateBuffer* cand_bf, Pictu
                 << 1;
             if (ctx->tune_daala_level >= 4) {
                 const uint32_t qindex = pcs->ppcs->frm_hdr.quantization_params.base_q_idx;
-                *(cand_bf->fast_cost) += svt_spatial_full_distortion_daala_kernel(
+                uint64_t daala_dist = svt_spatial_full_distortion_daala_kernel(
                                                                input_pic->y_buffer,
                                                                input_origin_index,
                                                                input_pic->y_stride << 1,
@@ -1022,6 +1022,10 @@ static void fast_loop_core_light_pd0(ModeDecisionCandidateBuffer* cand_bf, Pictu
                                                                qindex,
                                                                1)
                     << 1;
+                if (pcs->scs->static_config.encoder_bit_depth > EB_EIGHT_BIT) {
+                    daala_dist <<= 4;
+                }
+                *(cand_bf->fast_cost) += daala_dist;
             }
         }
     } else {
@@ -1426,7 +1430,7 @@ void fast_loop_core(ModeDecisionCandidateBuffer* cand_bf, PictureControlSet* pcs
 
     if (ctx->tune_daala_level >= 4) {
         const uint32_t qindex = pcs->ppcs->frm_hdr.quantization_params.base_q_idx;
-        *(cand_bf->fast_cost) += svt_spatial_full_distortion_daala_kernel(
+        uint64_t daala_dist = svt_spatial_full_distortion_daala_kernel(
             input_pic->y_buffer,
             input_origin_index,
             input_pic->y_stride,
@@ -1438,6 +1442,10 @@ void fast_loop_core(ModeDecisionCandidateBuffer* cand_bf, PictureControlSet* pcs
             pcs->scs->static_config.encoder_bit_depth,
             qindex,
             1);
+        if (pcs->scs->static_config.encoder_bit_depth > EB_EIGHT_BIT) {
+            daala_dist <<= 4;
+        }
+        *(cand_bf->fast_cost) += daala_dist;
     }
 
     if (ctx->obmc_ctrls.enabled && ctx->obmc_ctrls.trans_face_off == 1) {
@@ -4929,6 +4937,10 @@ static void tx_type_search(PictureControlSet* pcs, ModeDecisionContext* ctx, Mod
 
             txb_full_distortion_txt[DIST_DAALA][tx_type][DIST_CALC_PREDICTION] <<= 4;
             txb_full_distortion_txt[DIST_DAALA][tx_type][DIST_CALC_RESIDUAL] <<= 4;
+            if (pcs->scs->static_config.encoder_bit_depth > EB_EIGHT_BIT) {
+                txb_full_distortion_txt[DIST_DAALA][tx_type][DIST_CALC_PREDICTION] <<= 4;
+                txb_full_distortion_txt[DIST_DAALA][tx_type][DIST_CALC_RESIDUAL] <<= 4;
+            }
             txb_full_distortion_txt[DIST_DAALA][tx_type][DIST_CALC_PREDICTION] <<= ctx->mds_subres_step;
             txb_full_distortion_txt[DIST_DAALA][tx_type][DIST_CALC_RESIDUAL] <<= ctx->mds_subres_step;
 
@@ -5873,6 +5885,10 @@ static void perform_dct_dct_tx(PictureControlSet* pcs, ModeDecisionContext* ctx,
         if (ctx->tune_daala_level >= 3 || pcs->scs->static_config.enable_daala_rd) {
             y_full_distortion[DIST_DAALA][DIST_CALC_PREDICTION] <<= 4;
             y_full_distortion[DIST_DAALA][DIST_CALC_RESIDUAL] <<= 4;
+            if (pcs->scs->static_config.encoder_bit_depth > EB_EIGHT_BIT) {
+                y_full_distortion[DIST_DAALA][DIST_CALC_PREDICTION] <<= 4;
+                y_full_distortion[DIST_DAALA][DIST_CALC_RESIDUAL] <<= 4;
+            }
         }
     } else {
         // LUMA DISTORTION
@@ -6054,6 +6070,7 @@ static void full_loop_core_light_pd0(PictureControlSet* pcs, ModeDecisionContext
             pcs->scs->static_config.encoder_bit_depth,
             qindex,
             1);
+        y_daala_dist <<= 4;
         if (pcs->scs->static_config.encoder_bit_depth > EB_EIGHT_BIT) {
             y_daala_dist <<= 4;
         }

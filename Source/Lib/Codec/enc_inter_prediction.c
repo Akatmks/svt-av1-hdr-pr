@@ -2046,7 +2046,7 @@ static void model_rd_for_sb(PictureControlSet* pcs, EbPictureBufferDesc* predict
         int16_t         quantizer       = dequants->y_dequant_qtx[current_q_index][1];
 
         if (ctx->tune_daala_level >= 4) {
-            sse += svt_spatial_full_distortion_daala_kernel(input_pic->buffer[plane],
+            uint64_t daala_dist = svt_spatial_full_distortion_daala_kernel(input_pic->buffer[plane],
                                                             input_offset,
                                                             input_pic->stride[plane],
                                                             prediction_ptr->buffer[plane],
@@ -2057,6 +2057,10 @@ static void model_rd_for_sb(PictureControlSet* pcs, EbPictureBufferDesc* predict
                                                             bit_depth,
                                                             current_q_index,
                                                             1);
+            if (ctx->hbd_md) {
+                daala_dist <<= 4;
+            }
+            sse += daala_dist;
         }
 
         model_rd_from_sse(plane == 0 ? ctx->blk_geom->bsize : ctx->blk_geom->bsize_uv,
