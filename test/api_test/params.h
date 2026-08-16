@@ -464,16 +464,6 @@ static const vector<uint8_t> valid_film_grain_denoise_strength_pct = {
 static const vector<uint8_t> invalid_film_grain_denoise_strength_pct = {
     // none - uint8_t naturally limits to 255
 };
-static const vector<uint16_t> valid_film_grain_denoise_strength_pct = {
-    0,
-    50,
-    100,
-    500,
-    1000,
-};
-static const vector<uint16_t> invalid_film_grain_denoise_strength_pct = {
-    1001,
-};
 
 /* Warped motion
  *
