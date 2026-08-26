@@ -1,4 +1,4 @@
-﻿/*
+/*
 * Copyright(c) 2019 Intel Corporation
 *
 * This source code is subject to the terms of the BSD 3-Clause Clear License and
@@ -206,13 +206,6 @@ typedef struct SvtAv1SFramePositions {
     int8_t*   sframe_qp_offsets;
 } SvtAv1SFramePositions;
 
-typedef struct SvtAv1QualityZone {
-    uint32_t start_frame; // inclusive
-    uint32_t end_frame; // inclusive
-    int      zone_baseq; // base CRF/CQP value for this zone
-    int      zone_qsidx; // quarter step index
-} SvtAv1QualityZone;
-
 // Will contain the EbEncApi which will live in the EncHandle class
 // Only modifiable during config-time.
 typedef struct EbSvtAv1EncConfiguration {
@@ -242,7 +235,6 @@ typedef struct EbSvtAv1EncConfiguration {
      *
      * Default is -2. */
     int32_t intra_period_length;
-
 
     /* Random access.
      *
@@ -566,7 +558,6 @@ typedef struct EbSvtAv1EncConfiguration {
      * 0: disabled
      * 1: enabled
      * 2: more accurate (slower)
-     * 3: most accurate (very slow)
      */
     uint8_t enable_dlf_flag;
 
@@ -577,14 +568,25 @@ typedef struct EbSvtAv1EncConfiguration {
     uint32_t film_grain_denoise_strength;
 
     /**
-    * @brief Determines how much denoising is used.
-    * Only applicable when film grain is ON.
-    *
-    * 0 is no denoising (default)
-    * 1 is full denoising
-    *
-    * Default is 0. */
+     * @brief Determines how much denoising is used.
+     * Only applicable when film grain is ON.
+     *
+     * 0 is no denoising (default)
+     * 1 is full denoising
+     *
+     * Default is 0. */
     uint8_t film_grain_denoise_apply;
+
+    /**
+     * @brief Controls the strength of the denoising filter.
+     * Only applicable when film_grain_denoise_apply is enabled (1).
+     * This parameter is independent from the film grain generation strength.
+     *
+     * Range: 0-255, where 100 is normal/100% strength (default).
+     * 0 applies minimum denoising, 255 applies maximum denoising.
+     *
+     * Default is 100. */
+    uint8_t film_grain_denoise_strength_pct;
 
     /* CDEF Level
     *
@@ -651,7 +653,6 @@ typedef struct EbSvtAv1EncConfiguration {
      * 0 = off
      * 1 = on
      * 2 = adaptive
-     * 3 = full
      * Default is 1. */
     uint8_t enable_tf;
 
@@ -662,6 +663,30 @@ typedef struct EbSvtAv1EncConfiguration {
      * Default is 1.
      */
     uint8_t tune;
+
+    /**
+     * @brief Enable Daala distortion metric.
+     * 0 = off, 1-4 = level of how much Daala distortion metric is used in the pipeline.
+     * TODO: define the levels
+     * Default is 0.
+     */
+    uint8_t enable_daala;
+
+    /**
+     * @brief Enable Daala distortion in model RD curvfit for inter-intra mode selection.
+     * 0 = off, 1 = on
+     * Default is 0.
+     */
+    uint8_t enable_daala_rd;
+
+    /**
+     * @brief Enable Daala distortion in in-loop filtering decisions.
+     * 0 = disabled (default)
+     * 1 = loop restoration
+     * 2 = loop restoration + temporal filtering
+     * 3 = loop restoration + temporal filtering + deblocking
+     */
+    uint8_t enable_daala_filtering;
 
     // super-resolution parameters
     uint8_t superres_mode;
@@ -1105,80 +1130,36 @@ typedef struct EbSvtAv1EncConfiguration {
     int8_t noise_size;
 
     /**
+     * @brief TPL reactiveness scale - controls quality allocation to short-lasting new parts of the scene
+     *
+     * 0.0: disable TPL reactiveness adjustments
+     * 1.0: default TPL reactiveness
+     * Higher values increase quality given to new/transient scene content
+     * Default is 1.0, range is [0.0-10.0]
+     */
+    double tpl_reactiveness_scale;
+
+    /**
+     * @brief TPL importance scale - controls quality allocation to long-lasting/unchanging parts of the scene
+     *
+     * 0.0: disable TPL importance adjustments
+     * 1.0: default TPL importance
+     * Higher values increase quality given to persistent/static scene content
+     * Default is 1.0, range is [0.0-10.0]
+     */
+    double tpl_importance_scale;
+
+    /**
      * @brief Check if color range is provided by the user
      */
     bool color_range_provided;
-
-    /* The min intra period defines the interval of frames before which a new
-     * Intra refresh can be inserted. It is strongly recommended to set the
-     * value to a multiple of the mini-gop size.
-     *
-     *  0 = no minimum (only relevant when scd=1).
-     * -1 = auto.
-     *
-     * Default is -1. */
-    int32_t min_intra_period_length;
-
-    /**
-     * @brief Signal to the library to automatically adjust tiles
-     *
-     * Default is true.
-     */
-    bool auto_tiling;
-
-    /* @brief Quality zones configuration
-     *
-     * Default is no zones.
-     */
-    SvtAv1QualityZone* quality_zones;
-    uint16_t           num_zones;
-
-    /**
-     * @brief Enable alternative CDEF biases
-     * 0: disabled
-     * 1-3: enabled
-     * Default is 0
-     */
-    uint8_t alt_cdef;
-
-    /**
-     * @brief Enable alternative DLF biases
-     * 0: disabled
-     * 1-3: enabled
-     * Default is 0
-     */
-    uint8_t alt_dlf;
-
-    /**
-     * @brief Enable Daala distortion metric.
-     * 0 = OFF
-     * 1 = CDEF
-     * 2 = 1 + TX Search + MDS3 Selection
-     * 3 = 2 + DCT TX
-     * 4 = 3 + MDS0 + IFS RD + OBMC
-     * Default is 0.
-     */
-    uint8_t enable_daala;
-
-    /* @brief use settings which reduce memory usage
-     *
-     * Default is false.
-     */
-    bool low_memory;
-
-    /* @brief do not print encoder parameters
-     *
-     * Default is false.
-     */
-    bool hide_banner;
 
     /*Add 128 Byte Padding to Struct to avoid changing the size of the public configuration struct*/
     uint8_t padding[128 - sizeof(PredStructure) +
                     sizeof(uint8_t) // pred_strucutre type was changed from uint8_t to PredStructure
                     /* SVT-AV1-HDR additions */
-                    - (sizeof(uint8_t) * 13) - (sizeof(int8_t) * 1) - (sizeof(int32_t) * 2) - (sizeof(bool) * 6) -
-                    (sizeof(double)) - sizeof(SvtAv1QualityZone*) - sizeof(uint16_t) -
-                    6 /* implicit alignment padding */];
+                    - (sizeof(uint8_t) * 12) - (sizeof(int8_t) * 1) - (sizeof(int32_t) * 1) - (sizeof(bool) * 3) -
+                    (sizeof(double) * 3)];
     // clang-format on
 } EbSvtAv1EncConfiguration;
 

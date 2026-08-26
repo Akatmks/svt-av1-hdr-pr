@@ -183,7 +183,7 @@ static void tpl_prep_info(PictureParentControlSet* pcs) {
 void generate_lambda_scaling_factor(PictureParentControlSet* pcs, int64_t mc_dep_cost_base) {
     Av1Common*   cm                    = pcs->av1_cm;
     uint8_t      tpl_synth_size_offset = pcs->tpl_ctrls.synth_blk_size == 8 ? 1
-             : pcs->tpl_ctrls.synth_blk_size == 16                          ? 2
+        : pcs->tpl_ctrls.synth_blk_size == 16                               ? 2
                                                                             : 3;
     const int    step                  = 1 << (tpl_synth_size_offset);
     const int    mi_cols_sr            = ((pcs->enhanced_unscaled_pic->width + 15) / 16) << 2;
@@ -219,7 +219,9 @@ void generate_lambda_scaling_factor(PictureParentControlSet* pcs, int64_t mc_dep
             if (mc_dep_cost_base && (recrf_dist_sum > 0)) {
                 double rk = ((double)(recrf_dist_sum << (RDDIV_BITS))) /
                     ((recrf_dist_sum << RDDIV_BITS) + mc_dep_delta_sum);
-                scaling_factors += rk / pcs->r0;
+                // Apply reactiveness scale to amplify or dampen per-block adjustments
+                double rk_adjusted = (rk / pcs->r0) * pcs->tpl_ctrls.tpl_reactiveness_scale;
+                scaling_factors += rk_adjusted;
             }
             pcs->pa_me_data->tpl_rdmult_scaling_factors[index] = scaling_factors;
         }
@@ -380,12 +382,6 @@ static TxSize   tx_size_array[MAX_TPL_MODE]      = {TX_16X16, TX_32X32, TX_64X64
 static TxSize   sub2_tx_size_array[MAX_TPL_MODE] = {TX_16X8, TX_32X16, TX_64X32};
 static TxSize   sub4_tx_size_array[MAX_TPL_MODE] = {TX_16X4, TX_32X8, TX_64X16};
 
-static int32_t get_effective_tpl_qindex(const SequenceControlSet* scs, uint64_t picture_number) {
-    const SvtAv1EffectiveQp effective_qp = svt_av1_get_effective_qp(scs, picture_number);
-    const int32_t           qindex       = quantizer_to_qindex[effective_qp.qp] + effective_qp.qindex_offset;
-    return AOMMIN(MAXQ, qindex);
-}
-
 static void svt_tpl_init_mv_cost_params(svt_mv_cost_param* mv_cost_params, const Mv* ref_mv, uint8_t base_q_idx,
                                         uint32_t rdmult, uint8_t hbd_md) {
     mv_cost_params->ref_mv        = ref_mv;
@@ -426,8 +422,8 @@ static void tpl_subpel_search(SequenceControlSet* scs, PictureParentControlSet* 
                               const uint32_t mb_origin_y, const uint8_t bsize, Mv* best_mv) {
     const Av1Common* const cm         = pcs->av1_cm;
     const BlockSize        block_size = bsize == 8 ? BLOCK_8X8
-               : bsize == 16                       ? BLOCK_16X16
-               : bsize == 32                       ? BLOCK_32X32
+        : bsize == 16                              ? BLOCK_16X16
+        : bsize == 32                              ? BLOCK_32X32
                                                    : BLOCK_64X64;
 
     // ref_mv is used to calculate the cost of the motion vector
@@ -454,7 +450,9 @@ static void tpl_subpel_search(SequenceControlSet* scs, PictureParentControlSet* 
     svt_av1_set_subpel_mv_search_range(&ms_params->mv_limits, (FullMvLimits*)&mv_limits, &ref_mv);
 
     // Mvcost params
-    int32_t qIndex = get_effective_tpl_qindex(scs, pcs->picture_number);
+    int32_t qIndex = quantizer_to_qindex[(uint8_t)scs->static_config.qp] +
+        scs->static_config.extended_crf_qindex_offset;
+    qIndex          = AOMMIN(MAXQ, qIndex);
     uint32_t rdmult = svt_aom_compute_rd_mult_based_on_qindex(EB_EIGHT_BIT, pcs->update_type, qIndex) /
         TPL_RDMULT_SCALING_FACTOR;
     svt_tpl_init_mv_cost_params(&ms_params->mv_cost_params, &ref_mv, qIndex, rdmult,
@@ -573,8 +571,8 @@ static void tpl_mc_flow_dispenser_sb_generic(EncodeContext* enc_ctx, SequenceCon
         const CodedBlockStats* blk_stats_ptr = svt_aom_get_coded_blk_stats(z_blk_index);
         const uint8_t          bsize         = blk_stats_ptr->size;
         const BlockSize        block_size    = bsize == 8 ? BLOCK_8X8
-                      : bsize == 16                       ? BLOCK_16X16
-                      : bsize == 32                       ? BLOCK_32X32
+            : bsize == 16                                 ? BLOCK_16X16
+            : bsize == 32                                 ? BLOCK_32X32
                                                           : BLOCK_64X64;
         const uint32_t         mb_origin_x   = b64_geom->org_x + blk_stats_ptr->org_x;
         const uint32_t         mb_origin_y   = b64_geom->org_y + blk_stats_ptr->org_y;
@@ -1102,8 +1100,8 @@ static void tpl_mc_flow_dispenser_sb_generic(EncodeContext* enc_ctx, SequenceCon
                                                                          input_pic->height);
                 uint8_t ois_intra_mode = best_intra_mode;
                 int32_t p_angle        = av1_is_directional_mode((PredictionMode)ois_intra_mode)
-                           ? mode_to_angle_map[(PredictionMode)ois_intra_mode]
-                           : 0;
+                    ? mode_to_angle_map[(PredictionMode)ois_intra_mode]
+                    : 0;
                 // Edge filter
                 if (av1_is_directional_mode((PredictionMode)ois_intra_mode)) {
                     svt_aom_filter_intra_edge(ois_intra_mode,
@@ -1329,7 +1327,9 @@ static void tpl_mc_flow_dispenser(EncodeContext* enc_ctx, SequenceControlSet* sc
                                   PictureParentControlSet* pcs, int32_t frame_idx,
                                   SourceBasedOperationsContext* context_ptr) {
     EbPictureBufferDesc* recon_pic = enc_ctx->mc_flow_rec_picture_buffer[frame_idx];
-    int32_t              qIndex    = get_effective_tpl_qindex(scs, pcs->picture_number);
+    int32_t              qIndex    = quantizer_to_qindex[(uint8_t)scs->static_config.qp] +
+        scs->static_config.extended_crf_qindex_offset;
+    qIndex = AOMMIN(MAXQ, qIndex);
 
     if (pcs->tpl_ctrls.enable_tpl_qps) {
         static const double delta_rate_new[7][6] = {
@@ -1981,8 +1981,8 @@ void* svt_aom_tpl_disp_kernel(void* input_ptr) {
         int32_t frame_idx           = in_results_ptr->frame_index;
         context_ptr->coded_sb_count = 0;
 
-        uint16_t tile_group_width_in_sb = pcs->tile_group_info[0 /*context_ptr->tile_group_index*/] //  1 tile
-                                              .tile_group_width_in_sb;
+        uint16_t        tile_group_width_in_sb = pcs->tile_group_info[0 /*context_ptr->tile_group_index*/] //  1 tile
+                                                     .tile_group_width_in_sb;
         EncDecSegments* segments_ptr;
 
         segments_ptr = pcs->tpl_disp_segment_ctrl[0 /*context_ptr->tile_group_index*/]; //  1 tile
@@ -2020,7 +2020,7 @@ void* svt_aom_tpl_disp_kernel(void* input_ptr) {
                 segment_row_index  = segment_index / segments_ptr->segment_band_count;
                 segment_band_index = segment_index - segment_row_index * segments_ptr->segment_band_count;
                 segment_band_size  = (segments_ptr->sb_band_count * (segment_band_index + 1) +
-                                     segments_ptr->segment_band_count - 1) /
+                                      segments_ptr->segment_band_count - 1) /
                     segments_ptr->segment_band_count;
 
                 for (y_sb_index = y_sb_start_index, sb_segment_index = sb_start_index;
@@ -2301,34 +2301,17 @@ static void aom_av1_set_mb_ssim_rdmult_scaling(PictureParentControlSet* pcs) {
                 }
             }
         }
-    } else { // Do superblock-based adjustment if we're using alternative SSIM tuning
-        const int sb_size     = pcs->scs->seq_header.sb_size;
-        const int num_mi_w_sb = mi_size_wide[sb_size];
-        const int num_mi_h_sb = mi_size_high[sb_size];
-        const int num_cols_sb = (cm->mi_cols + num_mi_w_sb - 1) / num_mi_w_sb;
-        const int num_rows_sb = (cm->mi_rows + num_mi_h_sb - 1) / num_mi_h_sb;
-        const int num_blk_w   = num_mi_w_sb / num_mi_w;
-        const int num_blk_h   = num_mi_h_sb / num_mi_h;
-        for (int row = 0; row < num_rows_sb; ++row) {
-            for (int col = 0; col < num_cols_sb; ++col) {
-                double log_sum_sb = 0.0;
-                double blk_count  = 0.0;
-                for (int blk_row = row * num_blk_h; blk_row < (row + 1) * num_blk_h && blk_row < num_rows; ++blk_row) {
-                    for (int blk_col = col * num_blk_w; blk_col < (col + 1) * num_blk_w && blk_col < num_cols;
-                         ++blk_col) {
-                        const int index = blk_row * num_cols + blk_col;
-                        log_sum_sb += log(pcs->pa_me_data->ssim_rdmult_scaling_factors[index]);
-                        blk_count += 1.0;
-                    }
-                }
-                log_sum_sb = exp(log_sum_sb / blk_count);
-                for (int blk_row = row * num_blk_h; blk_row < (row + 1) * num_blk_h && blk_row < num_rows; ++blk_row) {
-                    for (int blk_col = col * num_blk_w; blk_col < (col + 1) * num_blk_w && blk_col < num_cols;
-                         ++blk_col) {
-                        const int index = blk_row * num_cols + blk_col;
-                        pcs->pa_me_data->ssim_rdmult_scaling_factors[index] /= log_sum_sb;
-                    }
-                }
+    } else { // Unbounded alternative SSIM tuning: fixed-reference, log-domain scaling
+        const double gain     = 2.0; // log2 octaves across the full activity range
+        const double min_log2 = -2.0;
+        const double max_log2 = 0.5;
+        for (int row = 0; row < num_rows; ++row) {
+            for (int col = 0; col < num_cols; ++col) {
+                const int    index  = row * num_cols + col;
+                const double factor = pcs->pa_me_data->ssim_rdmult_scaling_factors[index];
+                const double f_norm      = CLIP3(0.0, 1.0, (factor - 17.492222) / 67.035434);
+                const double log2_factor = CLIP3(min_log2, max_log2, gain * (f_norm - 0.5));
+                pcs->pa_me_data->ssim_rdmult_scaling_factors[index] = exp2(log2_factor);
             }
         }
     }

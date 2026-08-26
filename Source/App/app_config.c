@@ -1,4 +1,4 @@
-﻿/*
+/*
 * Copyright(c) 2019 Intel Corporation
 *
 * This source code is subject to the terms of the BSD 3-Clause Clear License and
@@ -35,10 +35,6 @@
 #include "app_output_ivf.h"
 #if !defined(_WIN32) || !defined(HAVE_STRNLEN_S)
 #include "third_party/safestringlib/safe_str_lib.h"
-#endif
-
-#if defined(_WIN32)
-#define strcasecmp _stricmp
 #endif
 
 /**********************************
@@ -94,6 +90,7 @@
 #define LEVEL_TOKEN "--level"
 #define FILM_GRAIN_TOKEN "--film-grain"
 #define FILM_GRAIN_DENOISE_APPLY_TOKEN "--film-grain-denoise"
+#define FILM_GRAIN_DENOISE_STRENGTH_TOKEN "--film-grain-denoise-strength"
 #define NOISE_TOKEN "--noise"
 #define NOISE_CHROMA_TOKEN "--noise-chroma"
 #define NOISE_CHROMA_FROM_LUMA_TOKEN "--noise-chroma-from-luma"
@@ -106,7 +103,6 @@
 #define ENABLE_OVERLAYS "--enable-overlays"
 #define TUNE_TOKEN "--tune"
 // --- end: ALTREF_FILTERING_SUPPORT
-#define LOW_MEMORY_TOKEN "--low-memory"
 // --- start: SUPER-RESOLUTION SUPPORT
 #define SUPERRES_MODE_INPUT "--superres-mode"
 #define SUPERRES_DENOM "--superres-denom"
@@ -151,7 +147,6 @@
 #define QP_FILE_NEW_TOKEN "--qpfile"
 #define INPUT_DEPTH_TOKEN "--input-depth"
 #define KEYINT_TOKEN "--keyint"
-#define MIN_KEYINT_TOKEN "--min-keyint"
 #define LOOKAHEAD_NEW_TOKEN "--lookahead"
 #define SVTAV1_PARAMS "--svtav1-params"
 
@@ -231,12 +226,11 @@
 #define COMPLEX_HVS_TOKEN "--complex-hvs"
 #define NOISE_ADAPTIVE_FILTERING_TOKEN "--noise-adaptive-filtering"
 #define CDEF_SCALING_TOKEN "--cdef-scaling"
-#define AUTO_TILING_TOKEN "--auto-tiling"
-#define ZONES_TOKEN "--zones"
-#define ALT_CDEF_TOKEN "--enable-alt-cdef"
-#define ALT_DLF_TOKEN "--enable-alt-dlf"
 #define ENABLE_DAALA_TOKEN "--enable-daala"
-#define HIDE_BANNER_TOKEN "--hide-banner"
+#define ENABLE_DAALA_RD_TOKEN "--enable-daala-rd"
+#define ENABLE_DAALA_FILTERING_TOKEN "--enable-daala-filtering"
+#define TPL_REACTIVENESS_SCALE_TOKEN "--tpl-reactiveness-scale"
+#define TPL_IMPORTANCE_SCALE_TOKEN "--tpl-importance-scale"
 
 static EbErrorType validate_error(EbErrorType err, const char* token, const char* value) {
     switch (err) {
@@ -388,25 +382,6 @@ static EbErrorType set_cfg_input_file(EbConfig* cfg, const char* token, const ch
         cfg->input_file = NULL;
         return validate_error(EB_ErrorBadParameter, token, "");
     }
-
-    cfg->input_file_path = strdup(value);
-
-    const char *ext = strrchr(value, '.');
-    if (ext && strcasecmp(ext, ".yuv") && strcasecmp(ext, ".y4m") &&
-        strcmp(value, "stdin") && strcmp(value, "-")) {
-#if HAVE_FFMS2
-        cfg->use_ffms2 = true;
-        // Don't open file handle for FFMS2 inputs
-        cfg->input_file = NULL;
-        cfg->input_file_is_fifo = false;
-        cfg->y4m_input = false;
-        return EB_ErrorNone;
-    }
-#else
-        fputs("Error: This build does not have FFMS2 support\n", stderr);
-        return EB_ErrorBadParameter;
-    }
-#endif
 
     if (!strcmp(value, "stdin") || !strcmp(value, "-")) {
         cfg->input_file         = stdin;
@@ -614,22 +589,6 @@ err:
     return EB_ErrorBadParameter;
 }
 
-static EbErrorType set_cfg_quality_zones(EbConfig* cfg, const char* token, const char* value) {
-    (void)token;
-
-    if (!value) {
-        return svt_av1_enc_parse_parameter(&cfg->config, "zones", "");
-    }
-
-    EbErrorType err = svt_av1_enc_parse_parameter(&cfg->config, "zones", value);
-    if (err != EB_ErrorNone) {
-        fprintf(stderr, "Error: Failed to parse quality zones from config file: %s\n", value);
-        return err;
-    }
-
-    return EB_ErrorNone;
-}
-
 static EbErrorType set_no_progress(EbConfig* cfg, const char* token, const char* value) {
     (void)token;
     switch (value ? *value : '1') {
@@ -805,8 +764,6 @@ ConfigDescription config_entry_options[] = {
     {PROGRESS_TOKEN, "Verbosity of the output, default is 1 [0: no progress is printed, 2: detailed progress]"},
     {NO_PROGRESS_TOKEN,
      "Do not print out progress, default is 0 [1: `" PROGRESS_TOKEN " 0`, 0: `" PROGRESS_TOKEN " 1`]"},
-    {HIDE_BANNER_TOKEN,
-     "Do not print out encoder parameters [0: params are printed (Default), 1: no param is printed]"},
 
     {PRESET_TOKEN,
      "Encoder preset, presets < 0 are for research purposes. Higher presets means faster encodes, but with "
@@ -968,13 +925,10 @@ ConfigDescription config_entry_2p[] = {
 
 ConfigDescription config_entry_intra_refresh[] = {
     {KEYINT_TOKEN,
-     "Max GOP size (frames), default is -2 [-2: ~10 seconds (up to 305 frames), -1: \"infinite\" and only applicable for "
+     "GOP size (frames), default is -2 [-2: ~10 seconds - up to 305 frames), -1: \"infinite\" and only applicable for "
      "CRF, 0: same as -1]"},
-    {MIN_KEYINT_TOKEN,
-     "Min GOP size (frames), default is -1 [-1: multiple of the mini-gop length (automatic), "
-     "0: no minimum]"},
     {INTRA_REFRESH_TYPE_TOKEN, "Intra refresh type, default is 2 [1: FWD Frame (Open GOP), 2: KEY Frame (Closed GOP)]"},
-    {SCENE_CHANGE_DETECTION_TOKEN, "Scene change detection control, default is 1 [0-1]"},
+    {SCENE_CHANGE_DETECTION_TOKEN, "Scene change detection control, default is 0 [0-1]"},
     {LOOKAHEAD_NEW_TOKEN,
      "Number of frames in the future to look ahead, not including minigop, temporal filtering, and "
      "rate control, default is -1 [-1: auto, 0-120]"},
@@ -996,8 +950,6 @@ ConfigDescription config_entry_intra_refresh[] = {
     {NULL, NULL}};
 
 ConfigDescription config_entry_specific[] = {
-    // Auto tiling
-    {AUTO_TILING_TOKEN, "Auto tiling, default is 1 [0-1]"},
     {TILE_ROW_TOKEN, "Number of tile rows to use, `TileRow == log2(x)`, default changes per resolution but is 1 [0-6]"},
     {TILE_COL_TOKEN,
      "Number of tile columns to use, `TileCol == log2(x)`, default changes per resolution but is 1 [0-4]"},
@@ -1012,7 +964,7 @@ ConfigDescription config_entry_specific[] = {
     {DG_ENABLE_NEW_TOKEN, "Dynamic GoP control, default is 1 [0-1]"},
     {FAST_DECODE_TOKEN, "Fast Decoder levels, default is 0 [0-2]"},
     // --- start: ALTREF_FILTERING_SUPPORT
-    {ENABLE_TF_TOKEN, "Enable ALT-REF (temporally filtered) frames, default is 1 [0-3]"},
+    {ENABLE_TF_TOKEN, "Enable ALT-REF (temporally filtered) frames, default is 1 [0-2]"},
 
     {ENABLE_OVERLAYS,
      "Enable the insertion of overlayer pictures which will be used as an additional reference "
@@ -1021,11 +973,6 @@ ConfigDescription config_entry_specific[] = {
     {TUNE_TOKEN,
      "Optimize the encoding process for different desired outcomes [0 = VQ, 1 = PSNR, 2 = SSIM, 3 = IQ (Image "
      "Quality), 4 = MS_SSIM (MS_SSIM and SSIMULACRA2 optimized mode), 5 = Film Grain], default is 1 [0-5]"},
-    {LOW_MEMORY_TOKEN,
-     "Specifies whether to use params which reduce RAM usage with potential efficiency and speed trade-offs, "
-     "most effective in CRF/CQP RA mode, "
-     "default is 0 "
-     "[0-1]"},
     // MD Parameters
     {SCREEN_CONTENT_TOKEN,
      "Set screen content detection level, default is 2 [0: off, 1: on, 2: content adaptive, 3: content adaptive "
@@ -1037,6 +984,10 @@ ConfigDescription config_entry_specific[] = {
     {FILM_GRAIN_DENOISE_APPLY_TOKEN,
      "Apply denoising when film grain is ON, default is 0 [0: no denoising, film grain data is "
      "still in frame header, 1: level of denoising is set by the film-grain parameter]"},
+
+    {FILM_GRAIN_DENOISE_STRENGTH_TOKEN,
+     "Denoising strength percentage for the input picture, default is 100 [0-255, 100 is normal/100% "
+     "strength]"},
 
     {FGS_TABLE_TOKEN, "Set the film grain model table path"},
 
@@ -1169,19 +1120,12 @@ ConfigDescription config_entry_psychovisual[] = {
      "on 2: default tune behavior, 3: CDEF only, 4: restoration only)]"},
     {CDEF_SCALING_TOKEN,
      "Controls scaling of the CDEF strength computation, default is 15 (1x scaling) [1: minimum, 8: ~0.5x, 30: 2x]"},
-    // Zones
-    {ZONES_TOKEN,
-	 "CRF/CQP zones, format: start,end,quality;start,end,quality;..., default is no zones"},
-    // Alt CDEF
-    {ALT_CDEF_TOKEN,
-     "Enable alternative CDEF biases."
-     "Default is 0 [0-3]."},
-    // Alt DLF
-    {ALT_DLF_TOKEN,
-     "Enable alternative DLF biases."
-     "Default is 0 [0-3]."},
-    {ENABLE_DAALA_TOKEN,
-     "Enable Daala distortion metric, default is 0 [0-4]"},
+    {ENABLE_DAALA_TOKEN, "Enable Daala distortion metric, default is 0 [0-4]"},
+    {ENABLE_DAALA_RD_TOKEN, "Enable Daala distortion in model RD curvfit, default is 0 [0-1]"},
+    {ENABLE_DAALA_FILTERING_TOKEN, "Enable Daala distortion in filtering decisions, default is 0 [0-3]"},
+    // TPL tuning parameters
+    {TPL_REACTIVENESS_SCALE_TOKEN, "TPL reactiveness scale for short-lasting content, default is 1.0 [0.0-10.0]"},
+    {TPL_IMPORTANCE_SCALE_TOKEN, "TPL importance scale for long-lasting content, default is 1.0 [0.0-10.0]"},
     // Termination
     {NULL, NULL}};
 
@@ -1198,7 +1142,6 @@ ConfigEntry config_entry[] = {
     {STAT_FILE_TOKEN, "StatFile", set_cfg_stat_file},
     {PROGRESS_TOKEN, "Progress", set_progress},
     {NO_PROGRESS_TOKEN, "NoProgress", set_no_progress},
-    {HIDE_BANNER_TOKEN, "HideBanner", set_cfg_generic_token},
     {PRESET_TOKEN, "EncoderMode", set_cfg_generic_token},
     {SVTAV1_PARAMS, "SvtAv1Params", parse_svtav1_params},
 
@@ -1288,7 +1231,6 @@ ConfigEntry config_entry[] = {
     // GOP size and type Options
     {INTRA_PERIOD_TOKEN, "IntraPeriod", set_cfg_generic_token},
     {KEYINT_TOKEN, "Keyint", set_cfg_generic_token},
-    {MIN_KEYINT_TOKEN, "MinKeyint", set_cfg_generic_token},
     {INTRA_REFRESH_TYPE_TOKEN, "IntraRefreshType", set_cfg_generic_token},
     {SCENE_CHANGE_DETECTION_TOKEN, "SceneChangeDetection", set_cfg_generic_token},
     {LOOKAHEAD_NEW_TOKEN, "Lookahead", set_cfg_generic_token},
@@ -1308,7 +1250,9 @@ ConfigEntry config_entry[] = {
     {DG_ENABLE_NEW_TOKEN, "EnableDg", set_cfg_generic_token},
     {FAST_DECODE_TOKEN, "FastDecode", set_cfg_generic_token},
     {TUNE_TOKEN, "Tune", set_cfg_generic_token},
-    {LOW_MEMORY_TOKEN, "LowMemory", set_cfg_generic_token},
+    {ENABLE_DAALA_TOKEN, "EnableDaala", set_cfg_generic_token},
+    {ENABLE_DAALA_RD_TOKEN, "EnableDaalaRd", set_cfg_generic_token},
+    {ENABLE_DAALA_FILTERING_TOKEN, "EnableDaalaFiltering", set_cfg_generic_token},
     //   ALT-REF filtering support
     {ENABLE_TF_TOKEN, "EnableTf", set_cfg_generic_token},
     {ENABLE_OVERLAYS, "EnableOverlays", set_cfg_generic_token},
@@ -1317,6 +1261,7 @@ ConfigEntry config_entry[] = {
 #if CONFIG_ENABLE_FILM_GRAIN
     {FILM_GRAIN_TOKEN, "FilmGrain", set_cfg_generic_token},
     {FILM_GRAIN_DENOISE_APPLY_TOKEN, "FilmGrainDenoise", set_cfg_generic_token},
+    {FILM_GRAIN_DENOISE_STRENGTH_TOKEN, "FilmGrainDenoiseStrength", set_cfg_generic_token},
     {FGS_TABLE_TOKEN, "FilmGrainTable", set_cfg_fgs_table_path},
     {NOISE_TOKEN, "Noise", set_cfg_generic_token},
     {NOISE_CHROMA_TOKEN, "NoiseChroma", set_cfg_generic_token},
@@ -1435,21 +1380,9 @@ ConfigEntry config_entry[] = {
     // CDEF scaling
     {CDEF_SCALING_TOKEN, "CDEFScaling", set_cfg_generic_token},
 
-    // Auto tiling
-    {AUTO_TILING_TOKEN, "AutoTiling", set_cfg_generic_token},
-
-    // Zones
-    {ZONES_TOKEN, "Zones", set_cfg_quality_zones},
-
-    // Alt CDEF
-    {ALT_CDEF_TOKEN, "AltCDEF", set_cfg_generic_token},
-
-    // Alt DLF
-    {ALT_DLF_TOKEN, "AltDLF", set_cfg_generic_token},
-
-    // Daala
-    {ENABLE_DAALA_TOKEN, "EnableDaala", set_cfg_generic_token},
-
+    // TPL tuning parameters
+    {TPL_REACTIVENESS_SCALE_TOKEN, "TplReactivenessScale", set_cfg_generic_token},
+    {TPL_IMPORTANCE_SCALE_TOKEN, "TplImportanceScale", set_cfg_generic_token},
     // Termination
     {NULL, NULL, NULL}};
 
@@ -1487,11 +1420,6 @@ void svt_config_dtor(EbConfig* app_cfg) {
         return;
     }
     // Close any files that are open
-    if (app_cfg->input_file_path) {
-        free(app_cfg->input_file_path);
-        app_cfg->input_file_path = NULL;
-    }
-
     if (app_cfg->input_file) {
         if (!app_cfg->input_file_is_fifo) {
             fclose(app_cfg->input_file);
@@ -1829,7 +1757,7 @@ static EbErrorType app_verify_config(EbConfig* app_cfg) {
     EbErrorType return_error = EB_ErrorNone;
 
     // Check Input File
-    if (app_cfg->input_file == NULL && !app_cfg->use_ffms2) {
+    if (app_cfg->input_file == NULL) {
         fprintf(app_cfg->error_log_file, "Error: Invalid Input File\n");
         return_error = EB_ErrorBadParameter;
     }
@@ -1986,21 +1914,21 @@ int get_version(int argc, char* const argv[], bool color) {
     if (find_token(argc, argv, VERSION_TOKEN, NULL)) {
         return 0;
     }
-    printf("SVT-AV1-Tritium %s (" BUILD_TYPE_STRING ")\n", svt_av1_get_version());
+    printf("SVT-AV1-HDR %s (" BUILD_TYPE_STRING ")\n", svt_av1_get_version());
 #if defined(_WIN64) || defined(_MSC_VER) || defined(_WIN32)
-    printf("Tritium Release: %s\n", svt_hdr_get_version());
+    printf("HDR Release: %s\n", svt_hdr_get_version());
 #else
     if (strcmp(svt_hdr_get_version(), "N/A")) {
         if (color) {
-            printf("Tritium Release: \x1b[32m%s\x1b[0m\n", svt_hdr_get_version());
+            printf("HDR Release: \x1b[32m%s\x1b[0m\n", svt_hdr_get_version());
         } else {
-            printf("Tritium Release: %s\n", svt_hdr_get_version());
+            printf("HDR Release: %s\n", svt_hdr_get_version());
         }
     } else {
         if (color) {
-            printf("Tritium Release: \x1b[38;5;248m%s\x1b[0m\n", svt_hdr_get_version());
+            printf("HDR Release: \x1b[38;5;248m%s\x1b[0m\n", svt_hdr_get_version());
         } else {
-            printf("Tritium Release: %s\n", svt_hdr_get_version());
+            printf("HDR Release: %s\n", svt_hdr_get_version());
         }
     }
 #endif
@@ -2749,7 +2677,7 @@ EbErrorType read_command_line(int32_t argc, char* const argv[], EncChannel* chan
             }
 
             // For pipe input it is fine if we have -1 here (we will update on end of stream)
-            if (app_cfg->frames_to_be_encoded == -1 && app_cfg->input_file != stdin && !app_cfg->input_file_is_fifo && !app_cfg->use_ffms2) {
+            if (app_cfg->frames_to_be_encoded == -1 && app_cfg->input_file != stdin && !app_cfg->input_file_is_fifo) {
                 fprintf(app_cfg->error_log_file, "Error: Input yuv does not contain enough frames \n");
                 channel->return_error = EB_ErrorBadParameter;
             }

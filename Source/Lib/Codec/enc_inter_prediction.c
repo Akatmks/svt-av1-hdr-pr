@@ -657,6 +657,30 @@ void model_rd_for_sb_with_curvfit(PictureControlSet* pcs, ModeDecisionContext* c
             sse = svt_aom_sse(src_buf, src_stride, pred_buf, pred_stride, bw, bh);
         }
 
+        if (pcs->scs->static_config.enable_daala_rd) {
+            const uint32_t qindex = pcs->ppcs->frm_hdr.quantization_params.base_q_idx;
+            uint64_t       daala_dist = svt_spatial_full_distortion_daala_kernel(
+                src_buf,
+                0,
+                src_stride,
+                pred_buf,
+                0,
+                pred_stride,
+                bw,
+                bh,
+                ctx->hbd_md ? EB_TEN_BIT : EB_EIGHT_BIT,
+                qindex,
+                1);
+
+            // For 10-bit, SSE is computed on 10-bit samples while Daala is computed on
+            // 8-bit-equivalent samples. Shift Daala by 4 to match the SSE scale.
+            if (ctx->hbd_md) {
+                daala_dist <<= 4;
+            }
+
+            sse += daala_dist;
+        }
+
         sse = ROUND_POWER_OF_TWO(sse, bd_round);
         model_rd_with_curvfit(pcs, plane_bsize, sse, bw * bh, &rate, &dist, ctx, full_lambda);
 
@@ -2021,8 +2045,8 @@ static void model_rd_for_sb(PictureControlSet* pcs, EbPictureBufferDesc* predict
         Dequants* const dequants        = ctx->hbd_md ? &scs->enc_ctx->deq_bd : &scs->enc_ctx->deq_8bit;
         int16_t         quantizer       = dequants->y_dequant_qtx[current_q_index][1];
 
-        if (ctx->tune_daala_level >= 4 && plane == 0) {
-            sse = svt_spatial_full_distortion_daala_kernel(input_pic->buffer[plane],
+        if (ctx->tune_daala_level >= 4) {
+            uint64_t daala_dist = svt_spatial_full_distortion_daala_kernel(input_pic->buffer[plane],
                                                             input_offset,
                                                             input_pic->stride[plane],
                                                             prediction_ptr->buffer[plane],
@@ -2033,6 +2057,10 @@ static void model_rd_for_sb(PictureControlSet* pcs, EbPictureBufferDesc* predict
                                                             bit_depth,
                                                             current_q_index,
                                                             1);
+            if (ctx->hbd_md) {
+                daala_dist <<= 4;
+            }
+            sse += daala_dist;
         }
 
         model_rd_from_sse(plane == 0 ? ctx->blk_geom->bsize : ctx->blk_geom->bsize_uv,
@@ -2525,7 +2553,7 @@ static void enc_make_inter_predictor_light_pd0(uint8_t* src, uint8_t* dst, Subpe
     svt_inter_predictor_light_pd0(src, src_stride, dst, dst_stride, blk_width, blk_height, subpel_params, conv_params);
 }
 
-void svt_aom_enc_make_inter_predictor(
+void NOINLINE svt_aom_enc_make_inter_predictor(
     SequenceControlSet* scs, uint8_t* src_ptr, uint8_t* src_ptr_2b, uint8_t* dst_ptr, int16_t pre_y, int16_t pre_x,
     Mv mv, const struct ScaleFactors* const sf, ConvolveParams* conv_params, InterpFilters interp_filters,
     const InterInterCompoundData* const interinter_comp, uint8_t* seg_mask, uint16_t frame_width, uint16_t frame_height,

@@ -52,16 +52,16 @@ static int32_t svt_aom_crf_assign_max_rate(PictureParentControlSet* ppcs) {
     int32_t start_index = ((ppcs->picture_number / frames_in_sw) * frames_in_sw) % CODED_FRAMES_STAT_QUEUE_MAX_DEPTH;
     int32_t end_index   = start_index + frames_in_sw;
     frames_in_sw        = (scs->passes > 1)
-               ? MIN(end_index, (int32_t)scs->twopass.stats_buf_ctx->total_stats->count) - start_index
-               : frames_in_sw;
+        ? MIN(end_index, (int32_t)scs->twopass.stats_buf_ctx->total_stats->count) - start_index
+        : frames_in_sw;
     int64_t max_bits_sw = (int64_t)(scs->static_config.max_bit_rate * ((double)frames_in_sw / scs->frame_rate));
     max_bits_sw += (max_bits_sw * scs->static_config.mbr_over_shoot_pct / 100);
 
     // Loop over the sliding window and calculated the spent bits
     for (int index = start_index; index < end_index; index++) {
         int32_t                   queue_entry_index = (index > CODED_FRAMES_STAT_QUEUE_MAX_DEPTH - 1)
-                              ? index - CODED_FRAMES_STAT_QUEUE_MAX_DEPTH
-                              : index;
+            ? index - CODED_FRAMES_STAT_QUEUE_MAX_DEPTH
+            : index;
         coded_frames_stats_entry* queue_entry_ptr   = rc->coded_frames_stat_queue[queue_entry_index];
         spent_bits_sw += (queue_entry_ptr->frame_total_bit_actual > 0) ? queue_entry_ptr->frame_total_bit_actual : 0;
         coded_frames_num_sw += (queue_entry_ptr->frame_total_bit_actual > 0) ? 1 : 0;
@@ -139,10 +139,10 @@ static int32_t svt_aom_crf_assign_max_rate(PictureParentControlSet* ppcs) {
     }
     // Decrease the active_worse_quality where undershoot happens and active_worst_quality is greater than the input QP
     if (available_bit_ratio > available_frames_ratio + 20 && available_frames_ratio < 10 &&
-        rc->active_worst_quality > quantizer_to_qindex[svt_av1_get_effective_qp(scs, ppcs->picture_number).qp]) {
+        rc->active_worst_quality > quantizer_to_qindex[scs->static_config.qp]) {
         rc->active_worst_quality -= rc->active_worst_quality / 10;
     }
-    rc->active_worst_quality = CLIP3(quantizer_to_qindex[svt_av1_get_effective_qp(scs, ppcs->picture_number).qp],
+    rc->active_worst_quality = CLIP3(quantizer_to_qindex[scs->static_config.qp],
                                      quantizer_to_qindex[scs->static_config.max_qp_allowed],
                                      rc->active_worst_quality);
 
@@ -288,6 +288,16 @@ static int crf_qindex_calc(PictureControlSet* pcs, RATE_CONTROL* rc, int qindex)
         }
 
         double qstep_ratio = sqrt(ppcs->r0) * weight * (1.000 + scs->static_config.qp_scale_compress_strength * 0.125);
+        // Apply TPL importance scale for long-lasting content
+        // Compute deviation from neutral (1.0)
+        double deviation = qstep_ratio - 1.0;
+        // Apply importance scale to amplify/compress the deviation
+        double scaled_deviation = deviation * ppcs->tpl_ctrls.tpl_importance_scale;
+        // Sigmoid soft-clip: rational sigmoid with k=0.5
+        const double k              = 0.5;
+        double       soft_deviation = scaled_deviation / (1.0 + k * fabs(scaled_deviation));
+        // Reconstruct final qstep ratio around neutral 1.0
+        qstep_ratio = 1.0 + soft_deviation;
         if (scs->static_config.qp_scale_compress_strength > 0.0) {
             // clamp qstep_ratio so it doesn't get past the weight value
             qstep_ratio = MIN(weight, qstep_ratio);
@@ -466,11 +476,9 @@ void svt_av1_rc_calc_qindex_crf_cqp(PictureControlSet* pcs, SequenceControlSet* 
     PictureParentControlSet* ppcs     = pcs->ppcs;
     QuantizationParams*      q_params = &ppcs->frm_hdr.quantization_params;
 
-    SvtAv1EffectiveQp effective_qp = svt_av1_get_effective_qp(scs, ppcs->picture_number);
-    uint8_t           scs_qp       = ppcs->is_startup_gop
-              ? clamp_qp(scs, effective_qp.qp + scs->static_config.startup_qp_offset)
-              : effective_qp.qp;
-    int scs_qindex = clamp_qindex(scs, quantizer_to_qindex[scs_qp] + effective_qp.qindex_offset);
+    uint8_t scs_qp = ppcs->is_startup_gop ? clamp_qp(scs, scs->static_config.qp + scs->static_config.startup_qp_offset)
+                                          : (uint8_t)scs->static_config.qp;
+    int     scs_qindex = clamp_qindex(scs, quantizer_to_qindex[scs_qp] + scs->static_config.extended_crf_qindex_offset);
 
     // if RC mode is 0, fixed QP is used
     // QP scaling based on POC number for Flat IPPP structure
@@ -482,8 +490,6 @@ void svt_av1_rc_calc_qindex_crf_cqp(PictureControlSet* pcs, SequenceControlSet* 
     if (ppcs->qp_on_the_fly) {
         new_qindex = quantizer_to_qindex[ppcs->picture_qp];
     } else {
-        int  active_ext_crf_qindex_offset = effective_qp.extended_crf_qindex_offset;
-        bool active_qp_is_max             = effective_qp.qp_is_max;
         if (scs->enable_qp_scaling_flag) {
             // if CRF
             if (ppcs->tpl_ctrls.enable) {
@@ -491,7 +497,7 @@ void svt_av1_rc_calc_qindex_crf_cqp(PictureControlSet* pcs, SequenceControlSet* 
                     rc->active_worst_quality = scs_qindex;
                     svt_av1_rc_init(scs);
                 }
-                new_qindex = crf_qindex_calc(pcs, rc, effective_qp.from_zone ? scs_qindex : rc->active_worst_quality);
+                new_qindex = crf_qindex_calc(pcs, rc, rc->active_worst_quality);
             } else { // if CQP
                 new_qindex = cqp_qindex_calc(pcs, scs_qindex);
             }
@@ -511,8 +517,8 @@ void svt_av1_rc_calc_qindex_crf_cqp(PictureControlSet* pcs, SequenceControlSet* 
         }
 
         // Extended CRF range (63.25 - 70), add offset to compress QP scaling
-        if (active_qp_is_max && active_ext_crf_qindex_offset) {
-            new_qindex += (MAXQ - new_qindex) * active_ext_crf_qindex_offset / 56;
+        if (scs->static_config.qp == MAX_QP_VALUE && scs->static_config.extended_crf_qindex_offset) {
+            new_qindex += (MAXQ - new_qindex) * scs->static_config.extended_crf_qindex_offset / 56;
             new_qindex = clamp_qindex(scs, new_qindex);
         }
 
@@ -607,15 +613,15 @@ void capped_crf_reencode(PictureParentControlSet* ppcs, int* const q) {
     int32_t start_index = ((ppcs->picture_number / frames_in_sw) * frames_in_sw) % CODED_FRAMES_STAT_QUEUE_MAX_DEPTH;
     int32_t end_index   = start_index + frames_in_sw;
     frames_in_sw        = (scs->passes > 1)
-               ? MIN(end_index, (int32_t)scs->twopass.stats_buf_ctx->total_stats->count) - start_index
-               : frames_in_sw;
+        ? MIN(end_index, (int32_t)scs->twopass.stats_buf_ctx->total_stats->count) - start_index
+        : frames_in_sw;
     int64_t max_bits_sw = (int64_t)(scs->static_config.max_bit_rate * (double)frames_in_sw / scs->frame_rate);
     max_bits_sw += max_bits_sw * scs->static_config.mbr_over_shoot_pct / 100;
     // Loop over the sliding window and calculated the spent bits
     for (int index = start_index; index < end_index; index++) {
         int32_t                   queue_entry_index = (index > CODED_FRAMES_STAT_QUEUE_MAX_DEPTH - 1)
-                              ? index - CODED_FRAMES_STAT_QUEUE_MAX_DEPTH
-                              : index;
+            ? index - CODED_FRAMES_STAT_QUEUE_MAX_DEPTH
+            : index;
         coded_frames_stats_entry* queue_entry_ptr   = rc->coded_frames_stat_queue[queue_entry_index];
         spent_bits_sw += (queue_entry_ptr->frame_total_bit_actual > 0) ? queue_entry_ptr->frame_total_bit_actual : 0;
         coded_frames_num_sw += (queue_entry_ptr->frame_total_bit_actual > 0) ? 1 : 0;
@@ -666,7 +672,7 @@ void capped_crf_reencode(PictureParentControlSet* ppcs, int* const q) {
     }
     // Decrease the active worse quality based on the projected frame size and max frame size
     else if (ppcs->projected_frame_size < ppcs->max_frame_size && ppcs->temporal_layer_index == 0 &&
-             ppcs->loop_count == 0 && rc->active_worst_quality > quantizer_to_qindex[svt_av1_get_effective_qp(scs, ppcs->picture_number).qp] &&
+             ppcs->loop_count == 0 && rc->active_worst_quality > quantizer_to_qindex[scs->static_config.qp] &&
              (available_bit_ratio > available_frames_ratio)) {
         if (ppcs->projected_frame_size < ppcs->max_frame_size / 3) {
             rc->active_worst_quality -= rc->active_worst_quality / 5;
@@ -676,7 +682,7 @@ void capped_crf_reencode(PictureParentControlSet* ppcs, int* const q) {
             rc->active_worst_quality -= rc->active_worst_quality / 12;
         }
 
-        rc->active_worst_quality = CLIP3(quantizer_to_qindex[svt_av1_get_effective_qp(scs, ppcs->picture_number).qp],
+        rc->active_worst_quality = CLIP3(quantizer_to_qindex[scs->static_config.qp],
                                          quantizer_to_qindex[scs->static_config.max_qp_allowed],
                                          rc->active_worst_quality);
     }

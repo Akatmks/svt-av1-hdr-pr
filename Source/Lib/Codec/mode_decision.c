@@ -460,6 +460,28 @@ static void inter_intra_search(PictureControlSet* pcs, ModeDecisionContext* ctx,
             {
                 rd = svt_aom_sse(src_buf, src_pic->y_stride, ii_pred_buf, bwidth, bwidth, bheight);
             }
+            if (pcs->scs->static_config.enable_daala_rd) {
+                const uint32_t qindex = pcs->ppcs->frm_hdr.quantization_params.base_q_idx;
+                uint64_t       daala_dist = svt_spatial_full_distortion_daala_kernel(
+                    ctx->hbd_md ? (uint8_t*)src_buf_hbd : src_buf,
+                    0,
+                    src_pic->y_stride,
+                    ii_pred_buf,
+                    0,
+                    bwidth,
+                    bwidth,
+                    bheight,
+                    ctx->hbd_md ? EB_TEN_BIT : EB_EIGHT_BIT,
+                    qindex,
+                    1);
+
+                // Scale Daala to match the SSE scale for 10-bit
+                if (ctx->hbd_md) {
+                    daala_dist <<= 4;
+                }
+
+                rd += daala_dist;
+            }
         }
         if (rd < best_interintra_rd) {
             best_interintra_rd             = rd;
@@ -639,8 +661,7 @@ static void mode_decision_scratch_cand_bf_dctor(EbPtr p) {
 EbErrorType svt_aom_mode_decision_cand_bf_ctor(ModeDecisionCandidateBuffer* buffer_ptr, EbBitDepth max_bitdepth,
                                                uint8_t sb_size, uint32_t buffer_desc_mask,
                                                EbPictureBufferDesc* temp_residual, EbPictureBufferDesc* temp_recon_ptr,
-                                               uint64_t* fast_cost, uint64_t* full_cost, uint64_t* full_cost_ssim,
-                                               uint64_t* full_cost_daala) {
+                                               uint64_t* fast_cost, uint64_t* full_cost, uint64_t* full_cost_ssim, uint64_t* full_cost_daala) {
     EbPictureBufferDescInitData picture_buffer_desc_init_data;
 
     EbPictureBufferDescInitData thirty_two_width_picture_buffer_desc_init_data;
@@ -3674,8 +3695,7 @@ EbErrorType generate_md_stage_0_cand(PictureControlSet* pcs, ModeDecisionContext
     memset(ctx->md_stage_0_count, 0, CAND_CLASS_TOTAL * sizeof(uint32_t));
     bool merge_inter_cands = 0;
     if (ctx->nic_ctrls.pruning_ctrls.merge_inter_cands_mult != (uint8_t)~0) {
-        const uint8_t effective_qp = svt_av1_get_effective_qp(pcs->scs, pcs->ppcs->picture_number).qp;
-        uint16_t      th = (ctx->nic_ctrls.pruning_ctrls.merge_inter_cands_mult * (63 - effective_qp)) >> 1;
+        uint16_t th = (ctx->nic_ctrls.pruning_ctrls.merge_inter_cands_mult * (63 - pcs->scs->static_config.qp)) >> 1;
         if ((MIN(ctx->md_me_dist, ctx->md_pme_dist) / (ctx->blk_geom->bwidth * ctx->blk_geom->bheight)) < th) {
             merge_inter_cands = 1;
         }
@@ -3863,10 +3883,10 @@ uint32_t svt_aom_product_full_mode_decision(PictureControlSet* pcs, ModeDecision
             uint64_t ssd_lowest_cost = 0xFFFFFFFFFFFFFFFFull;
             for (uint32_t i = 0; i < candidate_total_count; ++i) {
                 uint32_t cand_index = best_candidate_index_array[i];
-                uint64_t cost       = *(buffer_ptr_array[cand_index]->full_cost);
+                uint64_t cost = *(buffer_ptr_array[cand_index]->full_cost);
                 if (cost < ssd_lowest_cost) {
                     lowest_cost_index = cand_index;
-                    ssd_lowest_cost   = cost;
+                    ssd_lowest_cost = cost;
                 }
             }
 
@@ -3874,7 +3894,7 @@ uint32_t svt_aom_product_full_mode_decision(PictureControlSet* pcs, ModeDecision
             // For now, use the same threshold as SSIM; may need refinement.
             const double   threshold_factor   = derive_ssim_threshold_factor_for_full_md(scs);
             const uint64_t ssd_cost_threshold = (uint64_t)(threshold_factor * ssd_lowest_cost);
-            uint64_t       daala_lowest_cost  = 0xFFFFFFFFFFFFFFFFull;
+            uint64_t       daala_lowest_cost = 0xFFFFFFFFFFFFFFFFull;
             for (uint32_t i = 0; i < candidate_total_count; ++i) {
                 uint32_t cand_index = best_candidate_index_array[i];
 
@@ -3889,7 +3909,7 @@ uint32_t svt_aom_product_full_mode_decision(PictureControlSet* pcs, ModeDecision
                 } else if (daala_cost == daala_lowest_cost) {
                     // if two candidates have the same daala cost, check SSIM cost if enabled, else SSD
                     if (use_ssim_full_cost && ssd_cost <= ssd_cost_threshold) {
-                        uint64_t ssim_cost                = *(buffer_ptr_array[cand_index]->full_cost_ssim);
+                        uint64_t ssim_cost = *(buffer_ptr_array[cand_index]->full_cost_ssim);
                         uint64_t current_lowest_ssim_cost = *(buffer_ptr_array[lowest_cost_index]->full_cost_ssim);
                         if (ssim_cost < current_lowest_ssim_cost) {
                             lowest_cost_index = cand_index;
@@ -4506,10 +4526,11 @@ uint64_t svt_spatial_full_distortion_ssim_kernel(uint8_t* input, uint32_t input_
     return total_distortion;
 }
 
-uint64_t svt_spatial_full_distortion_daala_kernel(uint8_t* input, uint32_t input_offset, uint32_t input_stride,
-                                                  uint8_t* recon, int32_t recon_offset, uint32_t recon_stride,
-                                                  uint32_t area_width, uint32_t area_height, uint32_t bit_depth,
-                                                  int32_t qindex, int activity_masking) {
+uint64_t svt_spatial_full_distortion_daala_kernel(uint8_t* input, uint32_t input_offset,
+                                                   uint32_t input_stride, uint8_t* recon,
+                                                   int32_t recon_offset, uint32_t recon_stride,
+                                                   uint32_t area_width, uint32_t area_height,
+                                                   uint32_t bit_depth, int32_t qindex, int activity_masking) {
     uint64_t total_distortion = 0;
 
     // Need to convert 8-bit to 16-bit for DAALA dist function, or pad if area < 8x8
@@ -4522,7 +4543,7 @@ uint64_t svt_spatial_full_distortion_daala_kernel(uint8_t* input, uint32_t input
 
     // DAALA dist function requires at least 8x8 blocks and multiples of 8.
     // If the area is smaller than 8, we pad it to 8.
-    uint32_t calc_width  = area_width < 8 ? 8 : area_width;
+    uint32_t calc_width = area_width < 8 ? 8 : area_width;
     uint32_t calc_height = area_height < 8 ? 8 : area_height;
 
     if (bit_depth == 8) {
@@ -4531,45 +4552,25 @@ uint64_t svt_spatial_full_distortion_daala_kernel(uint8_t* input, uint32_t input
                 input_16bit[i * calc_width + j] = input[input_offset + i * input_stride + j];
                 recon_16bit[i * calc_width + j] = recon[recon_offset + i * recon_stride + j];
             }
-            for (uint32_t j = area_width; j < calc_width; j++) {
-                input_16bit[i * calc_width + j] = input_16bit[i * calc_width + area_width - 1];
-                recon_16bit[i * calc_width + j] = recon_16bit[i * calc_width + area_width - 1];
-            }
-        }
-        for (uint32_t i = area_height; i < calc_height; i++) {
-            for (uint32_t j = 0; j < calc_width; j++) {
-                input_16bit[i * calc_width + j] = input_16bit[(area_height - 1) * calc_width + j];
-                recon_16bit[i * calc_width + j] = recon_16bit[(area_height - 1) * calc_width + j];
-            }
         }
     } else {
-        uint32_t        coeff_shift = bit_depth - 8;
-        const uint16_t* input16     = (uint16_t*)input + input_offset;
-        const uint16_t* recon16     = (uint16_t*)recon + recon_offset;
+        uint32_t coeff_shift = bit_depth - 8;
+        const uint16_t* input16 = (uint16_t*)input + input_offset;
+        const uint16_t* recon16 = (uint16_t*)recon + recon_offset;
         for (uint32_t i = 0; i < area_height; i++) {
             for (uint32_t j = 0; j < area_width; j++) {
                 input_16bit[i * calc_width + j] = input16[i * input_stride + j] >> coeff_shift;
                 recon_16bit[i * calc_width + j] = recon16[i * recon_stride + j] >> coeff_shift;
             }
-            for (uint32_t j = area_width; j < calc_width; j++) {
-                input_16bit[i * calc_width + j] = input_16bit[i * calc_width + area_width - 1];
-                recon_16bit[i * calc_width + j] = recon_16bit[i * calc_width + area_width - 1];
-            }
-        }
-        for (uint32_t i = area_height; i < calc_height; i++) {
-            for (uint32_t j = 0; j < calc_width; j++) {
-                input_16bit[i * calc_width + j] = input_16bit[(area_height - 1) * calc_width + j];
-                recon_16bit[i * calc_width + j] = recon_16bit[(area_height - 1) * calc_width + j];
-            }
         }
     }
 
-    total_distortion = (uint64_t)svt_aom_od_compute_dist(
-        input_16bit, recon_16bit, calc_width, calc_height, qindex, activity_masking);
-
-    if (bit_depth > 8) {
-        total_distortion <<= 2 * (bit_depth - 8);
-    }
+    total_distortion = (uint64_t)svt_aom_od_compute_dist(input_16bit,
+                                                        recon_16bit,
+                                                        calc_width,
+                                                        calc_height,
+                                                        qindex,
+                                                        activity_masking);
 
     return total_distortion;
 }
